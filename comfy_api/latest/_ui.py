@@ -5,6 +5,7 @@ import os
 import random
 import uuid
 from io import BytesIO
+from typing import TYPE_CHECKING, Any
 
 import av
 import numpy as np
@@ -22,6 +23,15 @@ import folder_paths
 # used for image preview
 from comfy.cli_args import args
 from ._io import ComfyNode, FolderType, Image, _UIOutput
+
+if TYPE_CHECKING:
+    from ._ui_types import (
+        ImagesUIOutput,
+        AudioUIOutput,
+        VideoUIOutput,
+        TextUIOutput,
+        UI3DUIOutput,
+    )
 
 
 class SavedResult(dict):
@@ -48,11 +58,11 @@ class SavedImages(_UIOutput):
         self.results = results
         self.is_animated = is_animated
 
-    def as_dict(self) -> dict:
-        data = {"images": self.results}
+    def as_dict(self) -> "ImagesUIOutput":
+        data: dict[str, Any] = {"images": self.results}
         if self.is_animated:
             data["animated"] = (True,)
-        return data
+        return data  # type: ignore[return-value]
 
 
 class SavedAudios(_UIOutput):
@@ -61,8 +71,8 @@ class SavedAudios(_UIOutput):
         super().__init__()
         self.results = results
 
-    def as_dict(self) -> dict:
-        return {"audio": self.results}
+    def as_dict(self) -> "AudioUIOutput":
+        return {"audio": self.results}  # type: ignore[return-value]
 
 
 def _get_directory_by_folder_type(folder_type: FolderType) -> str:
@@ -397,9 +407,9 @@ class PreviewImage(_UIOutput):
         )
         self.animated = animated
 
-    def as_dict(self):
+    def as_dict(self) -> "ImagesUIOutput":
         return {
-            "images": self.values,
+            "images": self.values,  # type: ignore[typeddict-item]
             "animated": (self.animated,)
         }
 
@@ -421,16 +431,16 @@ class PreviewAudio(_UIOutput):
             quality="128k",
         )
 
-    def as_dict(self) -> dict:
-        return {"audio": self.values}
+    def as_dict(self) -> "AudioUIOutput":
+        return {"audio": self.values}  # type: ignore[return-value]
 
 
 class PreviewVideo(_UIOutput):
     def __init__(self, values: list[SavedResult | dict], **kwargs):
         self.values = values
 
-    def as_dict(self):
-        return {"images": self.values, "animated": (True,)}
+    def as_dict(self) -> "VideoUIOutput":
+        return {"images": self.values, "animated": (True,)}  # type: ignore[return-value]
 
 
 class PreviewUI3D(_UIOutput):
@@ -448,7 +458,7 @@ class PreviewUI3D(_UIOutput):
             img.save(bg_image_path, compress_level=1)
             self.bg_image_path = f"temp/{filename}"
 
-    def as_dict(self):
+    def as_dict(self) -> "UI3DUIOutput":
         return {"result": [self.model_file, self.camera_info, self.bg_image_path]}
 
 
@@ -456,7 +466,7 @@ class PreviewText(_UIOutput):
     def __init__(self, value: str, **kwargs):
         self.value = value
 
-    def as_dict(self):
+    def as_dict(self) -> "TextUIOutput":
         return {"text": (self.value,)}
 
 

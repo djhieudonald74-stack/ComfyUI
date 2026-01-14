@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from comfy.sd import CLIP, VAE
     from comfy.sd import StyleModel as StyleModel_
     from comfy_api.input import VideoInput
+    from ._ui_types import UIOutputDict
 from comfy_api.internal import (_ComfyNodeInternal, _NodeOutputInternal, classproperty, copy_class, first_real_override, is_class,
     prune_dict, shallow_clone_class)
 from comfy_execution.graph_utils import ExecutionBlocker
@@ -1873,7 +1874,7 @@ class _UIOutput(ABC):
         pass
 
     @abstractmethod
-    def as_dict(self) -> dict:
+    def as_dict(self) -> "UIOutputDict":
         ...
 
 
