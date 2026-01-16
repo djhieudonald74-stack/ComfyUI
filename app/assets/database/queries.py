@@ -838,6 +838,66 @@ def get_asset_tags(session: Session, *, asset_info_id: str) -> list[str]:
     ]
 
 
+def add_tags_to_asset_info(
+    session: Session,
+    *,
+    asset_info_id: str,
+    tags: Sequence[str],
+    origin: str = "manual",
+    create_if_missing: bool = True,
+    asset_info_row: Any = None,
+) -> dict:
+    if not asset_info_row:
+        info = session.get(AssetInfo, asset_info_id)
+        if not info:
+            raise ValueError(f"AssetInfo {asset_info_id} not found")
+
+    norm = normalize_tags(tags)
+    if not norm:
+        total = get_asset_tags(session, asset_info_id=asset_info_id)
+        return {"added": [], "already_present": [], "total_tags": total}
+
+    if create_if_missing:
+        ensure_tags_exist(session, norm, tag_type="user")
+
+    current = {
+        tag_name
+        for (tag_name,) in (
+            session.execute(
+                sa.select(AssetInfoTag.tag_name).where(AssetInfoTag.asset_info_id == asset_info_id)
+            )
+        ).all()
+    }
+
+    want = set(norm)
+    to_add = sorted(want - current)
+
+    if to_add:
+        with session.begin_nested() as nested:
+            try:
+                session.add_all(
+                    [
+                        AssetInfoTag(
+                            asset_info_id=asset_info_id,
+                            tag_name=t,
+                            origin=origin,
+                            added_at=utcnow(),
+                        )
+                        for t in to_add
+                    ]
+                )
+                session.flush()
+            except IntegrityError:
+                nested.rollback()
+
+    after = set(get_asset_tags(session, asset_info_id=asset_info_id))
+    return {
+        "added": sorted(((after - current) & want)),
+        "already_present": sorted(want & current),
+        "total_tags": sorted(after),
+    }
+
+
 def remove_missing_tag_for_asset_id(
     session: Session,
     *,

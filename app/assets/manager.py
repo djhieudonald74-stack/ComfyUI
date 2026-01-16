@@ -20,6 +20,7 @@ from app.assets.database.queries import (
     list_asset_infos_page,
     list_tags_with_usage,
     get_asset_tags,
+    add_tags_to_asset_info,
     pick_best_live_path,
     ingest_fs_asset,
     set_asset_info_preview,
@@ -432,6 +433,31 @@ def create_asset_from_hash(
         last_access_time=info.last_access_time,
         created_new=False,
     )
+
+
+def add_tags_to_asset(
+    *,
+    asset_info_id: str,
+    tags: list[str],
+    origin: str = "manual",
+    owner_id: str = "",
+) -> schemas_out.TagsAdd:
+    with create_session() as session:
+        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
+        if not info_row:
+            raise ValueError(f"AssetInfo {asset_info_id} not found")
+        if info_row.owner_id and info_row.owner_id != owner_id:
+            raise PermissionError("not owner")
+        data = add_tags_to_asset_info(
+            session,
+            asset_info_id=asset_info_id,
+            tags=tags,
+            origin=origin,
+            create_if_missing=True,
+            asset_info_row=info_row,
+        )
+        session.commit()
+    return schemas_out.TagsAdd(**data)
 
 
 def list_tags(

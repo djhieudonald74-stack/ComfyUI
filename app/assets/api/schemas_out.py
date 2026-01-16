@@ -77,3 +77,10 @@ class TagsList(BaseModel):
     tags: list[TagUsage] = Field(default_factory=list)
     total: int
     has_more: bool
+
+
+class TagsAdd(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    added: list[str] = Field(default_factory=list)
+    already_present: list[str] = Field(default_factory=list)
+    total_tags: list[str] = Field(default_factory=list)

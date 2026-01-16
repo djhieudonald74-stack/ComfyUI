@@ -131,6 +131,29 @@ class TagsListQuery(BaseModel):
         return v.lower() or None
 
 
+class TagsAdd(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    tags: list[str] = Field(..., min_length=1)
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, v: list[str]) -> list[str]:
+        out = []
+        for t in v:
+            if not isinstance(t, str):
+                raise TypeError("tags must be strings")
+            tnorm = t.strip().lower()
+            if tnorm:
+                out.append(tnorm)
+        seen = set()
+        deduplicated = []
+        for x in out:
+            if x not in seen:
+                seen.add(x)
+                deduplicated.append(x)
+        return deduplicated
+
+
 class UploadAssetSpec(BaseModel):
     """Upload Asset operation.
     - tags: ordered; first is root ('models'|'input'|'output');

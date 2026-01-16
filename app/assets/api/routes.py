@@ -93,32 +93,6 @@ async def get_asset(request: web.Request) -> web.Response:
     return web.json_response(result.model_dump(mode="json"), status=200)
 
 
-@ROUTES.get("/api/tags")
-async def get_tags(request: web.Request) -> web.Response:
-    """
-    GET request to list all tags based on query parameters.
-    """
-    query_map = dict(request.rel_url.query)
-
-    try:
-        query = schemas_in.TagsListQuery.model_validate(query_map)
-    except ValidationError as e:
-        return web.json_response(
-            {"error": {"code": "INVALID_QUERY", "message": "Invalid query parameters", "details": e.errors()}},
-            status=400,
-        )
-
-    result = manager.list_tags(
-        prefix=query.prefix,
-        limit=query.limit,
-        offset=query.offset,
-        order=query.order,
-        include_zero=query.include_zero,
-        owner_id=USER_MANAGER.get_request_user_id(request),
-    )
-    return web.json_response(result.model_dump(mode="json"))
-
-
 @ROUTES.get(f"/api/assets/{{id:{UUID_RE}}}/content")
 async def download_asset_content(request: web.Request) -> web.Response:
     # question: do we need disposition? could we just stick with one of these?
@@ -432,3 +406,59 @@ async def delete_asset(request: web.Request) -> web.Response:
     if not deleted:
         return _error_response(404, "ASSET_NOT_FOUND", f"AssetInfo {asset_info_id} not found.")
     return web.Response(status=204)
+
+
+@ROUTES.get("/api/tags")
+async def get_tags(request: web.Request) -> web.Response:
+    """
+    GET request to list all tags based on query parameters.
+    """
+    query_map = dict(request.rel_url.query)
+
+    try:
+        query = schemas_in.TagsListQuery.model_validate(query_map)
+    except ValidationError as e:
+        return web.json_response(
+            {"error": {"code": "INVALID_QUERY", "message": "Invalid query parameters", "details": e.errors()}},
+            status=400,
+        )
+
+    result = manager.list_tags(
+        prefix=query.prefix,
+        limit=query.limit,
+        offset=query.offset,
+        order=query.order,
+        include_zero=query.include_zero,
+        owner_id=USER_MANAGER.get_request_user_id(request),
+    )
+    return web.json_response(result.model_dump(mode="json"))
+
+@ROUTES.post(f"/api/assets/{{id:{UUID_RE}}}/tags")
+async def add_asset_tags(request: web.Request) -> web.Response:
+    asset_info_id = str(uuid.UUID(request.match_info["id"]))
+    try:
+        payload = await request.json()
+        data = schemas_in.TagsAdd.model_validate(payload)
+    except ValidationError as ve:
+        return _error_response(400, "INVALID_BODY", "Invalid JSON body for tags add.", {"errors": ve.errors()})
+    except Exception:
+        return _error_response(400, "INVALID_JSON", "Request body must be valid JSON.")
+
+    try:
+        result = manager.add_tags_to_asset(
+            asset_info_id=asset_info_id,
+            tags=data.tags,
+            origin="manual",
+            owner_id=USER_MANAGER.get_request_user_id(request),
+        )
+    except (ValueError, PermissionError) as ve:
+        return _error_response(404, "ASSET_NOT_FOUND", str(ve), {"id": asset_info_id})
+    except Exception:
+        logging.exception(
+            "add_tags_to_asset failed for asset_info_id=%s, owner_id=%s",
+            asset_info_id,
+            USER_MANAGER.get_request_user_id(request),
+        )
+        return _error_response(500, "INTERNAL", "Unexpected server error.")
+
+    return web.json_response(result.model_dump(mode="json"), status=200)
