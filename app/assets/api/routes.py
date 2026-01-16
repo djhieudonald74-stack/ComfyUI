@@ -497,7 +497,6 @@ async def delete_asset_tags(request: web.Request) -> web.Response:
 
 @ROUTES.post("/api/assets/scan/seed")
 async def seed_assets(request: web.Request) -> web.Response:
-    logging.info("seed_assets request received")
     try:
         payload = await request.json()
     except Exception:
@@ -514,3 +513,4 @@ async def seed_assets(request: web.Request) -> web.Response:
         logging.exception("seed_assets failed for roots=%s", body.roots)
         return _error_response(500, "INTERNAL", "Unexpected server error.")
     return web.json_response({"synced": True, "roots": body.roots}, status=200)
+
