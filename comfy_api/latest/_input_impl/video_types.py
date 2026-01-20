@@ -393,9 +393,7 @@ class VideoFromComponents(VideoInput):
             raise ValueError(f"Unsupported codec: {resolved_codec}")
         ffmpeg_codec = codec_map[resolved_codec]
 
-        extra_kwargs = {}
-        if resolved_format != VideoContainer.AUTO:
-            extra_kwargs["format"] = resolved_format.value
+        extra_kwargs = {"format": resolved_format.value}
 
         container_options = {}
         if resolved_format == VideoContainer.MP4:
@@ -411,11 +409,9 @@ class VideoFromComponents(VideoInput):
             video_stream.width = self.__components.images.shape[2]
             video_stream.height = self.__components.images.shape[1]
 
+            video_stream.pix_fmt = 'yuv420p'
             if resolved_codec == VideoCodec.VP9:
-                video_stream.pix_fmt = 'yuv420p'
                 video_stream.bit_rate = 0
-            else:
-                video_stream.pix_fmt = 'yuv420p'
 
             if quality is not None:
                 crf = quality_to_crf(quality, ffmpeg_codec)
