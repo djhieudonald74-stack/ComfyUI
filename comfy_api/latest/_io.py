@@ -1249,6 +1249,7 @@ class NodeInfoV1:
     experimental: bool=None
     api_node: bool=None
     price_badge: dict | None = None
+    search_aliases: list[str]=None
 
 @dataclass
 class NodeInfoV3:
@@ -1485,6 +1486,7 @@ class Schema:
             api_node=self.is_api_node,
             python_module=getattr(cls, "RELATIVE_PYTHON_MODULE", "nodes"),
             price_badge=self.price_badge.as_dict(self.inputs) if self.price_badge is not None else None,
+            search_aliases=self.search_aliases if self.search_aliases else None,
         )
         return info
 
