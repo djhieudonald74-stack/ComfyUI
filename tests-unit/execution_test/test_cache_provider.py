@@ -1,7 +1,14 @@
 """Tests for external cache provider API."""
 
+import importlib.util
 import pytest
 from typing import Optional
+
+
+def _torch_available() -> bool:
+    """Check if PyTorch is available."""
+    return importlib.util.find_spec("torch") is not None
+
 
 from comfy_execution.cache_provider import (
     CacheProvider,
@@ -347,12 +354,3 @@ class MockCacheProvider(CacheProvider):
 
     def on_store(self, context: CacheContext, value: CacheValue) -> None:
         self.stores.append((context, value))
-
-
-def _torch_available() -> bool:
-    """Check if PyTorch is available."""
-    try:
-        import torch
-        return True
-    except ImportError:
-        return False
