@@ -142,10 +142,12 @@ class TestSerializeCacheKey:
 
     def test_complex_nested_structure(self):
         """Complex nested structures should hash deterministically."""
+        # Note: frozensets can only contain hashable types, so we use
+        # nested frozensets of tuples to represent dict-like structures
         key = frozenset([
             ("node_1", frozenset([
                 ("input_a", ("tuple", "value")),
-                ("input_b", {"nested": "dict"}),
+                ("input_b", frozenset([("nested", "dict")])),
             ])),
             ("node_2", frozenset([
                 ("param", 42),
@@ -157,6 +159,18 @@ class TestSerializeCacheKey:
         hash2 = serialize_cache_key(key)
 
         assert hash1 == hash2
+
+    def test_dict_in_cache_key(self):
+        """Dicts passed directly to serialize_cache_key should work."""
+        # This tests the _canonicalize function's ability to handle dicts
+        key = {"node_1": {"input": "value"}, "node_2": 42}
+
+        hash1 = serialize_cache_key(key)
+        hash2 = serialize_cache_key(key)
+
+        assert hash1 == hash2
+        assert isinstance(hash1, bytes)
+        assert len(hash1) == 32
 
 
 class TestContainsNan:
