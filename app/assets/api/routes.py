@@ -496,21 +496,22 @@ async def delete_asset_tags(request: web.Request) -> web.Response:
     return web.json_response(result.model_dump(mode="json"), status=200)
 
 
-@ROUTES.post("/api/assets/scan/seed")
-async def seed_assets(request: web.Request) -> web.Response:
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
+# NOTE: this exists in case we decide to enable asset scan to be triggered separately from calling /object_info
+# @ROUTES.post("/api/assets/scan/seed")
+# async def seed_assets(request: web.Request) -> web.Response:
+#     try:
+#         payload = await request.json()
+#     except Exception:
+#         payload = {}
 
-    try:
-        body = schemas_in.ScheduleAssetScanBody.model_validate(payload)
-    except ValidationError as ve:
-        return _validation_error_response("INVALID_BODY", ve)
+#     try:
+#         body = schemas_in.ScheduleAssetScanBody.model_validate(payload)
+#     except ValidationError as ve:
+#         return _validation_error_response("INVALID_BODY", ve)
 
-    try:
-        scanner.seed_assets(body.roots)
-    except Exception:
-        logging.exception("seed_assets failed for roots=%s", body.roots)
-        return _error_response(500, "INTERNAL", "Unexpected server error.")
-    return web.json_response({"synced": True, "roots": body.roots}, status=200)
+#     try:
+#         scanner.seed_assets(body.roots)
+#     except Exception:
+#         logging.exception("seed_assets failed for roots=%s", body.roots)
+#         return _error_response(500, "INTERNAL", "Unexpected server error.")
+#     return web.json_response({"synced": True, "roots": body.roots}, status=200)
