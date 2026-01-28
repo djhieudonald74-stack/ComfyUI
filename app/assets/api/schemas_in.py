@@ -1,5 +1,4 @@
 import json
-import uuid
 from typing import Any, Literal
 
 from pydantic import (
@@ -10,8 +9,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from app.assets.helpers import RootType
 
 class ListAssetsQuery(BaseModel):
     include_tags: list[str] = Field(default_factory=list)

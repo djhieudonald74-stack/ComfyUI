@@ -8,7 +8,6 @@ from aiohttp import web
 from pydantic import ValidationError
 
 import app.assets.manager as manager
-import app.assets.scanner as scanner
 from app import user_manager
 from app.assets.api import schemas_in
 from app.assets.helpers import get_query_dict
