@@ -698,7 +698,7 @@ def register_replacements_upscaleimage():
             input_mapping=[
                 node_replace.InputMap(new_id="input", assign=node_replace.InputMap.OldId("image")),
                 node_replace.InputMap(new_id="resize_type", assign=node_replace.InputMap.SetValue("scale by multiplier")),
-                node_replace.InputMap(new_id="multiplier", assign=node_replace.InputMap.OldId("scale_by")),
+                node_replace.InputMap(new_id="resize_type.multiplier", assign=node_replace.InputMap.OldId("scale_by")),
                 node_replace.InputMap(new_id="scale_method", assign=node_replace.InputMap.OldId("upscale_method")),
             ],
         ))
