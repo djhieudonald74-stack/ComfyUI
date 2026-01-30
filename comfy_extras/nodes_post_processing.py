@@ -637,6 +637,54 @@ class BatchImagesMasksLatentsNode(io.ComfyNode):
             batched = batch_masks(values)
         return io.NodeOutput(batched)
 
+
+from comfy_api.latest import node_replace
+
+def register_replacements():
+    register_replacements_longeredge()
+    register_replacements_batchimages()
+    register_replacements_upscaleimage()
+
+def register_replacements_longeredge():
+    # No dynamic inputs here
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="ImageScaleToMaxDimension",
+            old_node_id="ResizeImagesByLongerEdge",
+            old_widget_ids=["longer_edge"],
+            input_mapping=[
+                node_replace.InputMap(new_id="image", assign=node_replace.InputMap.OldId("images")),
+                node_replace.InputMap(new_id="largest_size", assign=node_replace.InputMap.OldId("longer_edge")),
+                node_replace.InputMap(new_id="upscale_method", assign=node_replace.InputMap.SetValue("lanczos")),
+            ],
+            # just to test the frontend output_mapping code, does nothing really here
+            output_mapping=[node_replace.OutputMap(new_idx=0, old_idx=0)],
+        ))
+
+def register_replacements_batchimages():
+    # BatchImages node uses Autogrow
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="BatchImagesNode",
+            old_node_id="ImageBatch",
+            input_mapping=[
+                node_replace.InputMap(new_id="images.image0", assign=node_replace.InputMap.OldId("image1")),
+                node_replace.InputMap(new_id="images.image1", assign=node_replace.InputMap.OldId("image2")),
+            ],
+        ))
+
+def register_replacements_upscaleimage():
+    # ResizeImageMaskNode uses DynamicCombo
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="ResizeImageMaskNode",
+            old_node_id="ImageScaleBy",
+            old_widget_ids=["upscale_method", "scale_by"],
+            input_mapping=[
+                node_replace.InputMap(new_id="input", assign=node_replace.InputMap.OldId("image")),
+                node_replace.InputMap(new_id="resize_type", assign=node_replace.InputMap.SetValue("scale by multiplier")),
+                node_replace.InputMap(new_id="multiplier", assign=node_replace.InputMap.OldId("scale_by")),
+                node_replace.InputMap(new_id="scale_method", assign=node_replace.InputMap.OldId("upscale_method")),
+            ],
+        ))
+
 class PostProcessingExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
