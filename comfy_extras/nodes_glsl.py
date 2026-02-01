@@ -146,6 +146,17 @@ def _detect_output_count(source: str) -> int:
     return min(max_index + 1, MAX_OUTPUTS)
 
 
+def _detect_pass_count(source: str) -> int:
+    """Detect multi-pass rendering from #pragma passes N directive.
+
+    Returns the number of passes (1 if not specified).
+    """
+    match = re.search(r'#pragma\s+passes\s+(\d+)', source)
+    if match:
+        return max(1, int(match.group(1)))
+    return 1
+
+
 def _init_glfw():
     """Initialize GLFW. Returns (window, glfw_module). Raises RuntimeError on failure."""
     logger.debug("_init_glfw: starting")
@@ -491,6 +502,7 @@ def _render_shader_batch(
     Render a fragment shader for multiple batches efficiently.
 
     Compiles shader once, reuses framebuffer/textures across batches.
+    Supports multi-pass rendering via #pragma passes N directive.
 
     Args:
         fragment_code: User's fragment shader code
@@ -503,6 +515,9 @@ def _render_shader_batch(
     Returns:
         List of batch outputs, each is a list of output images (H, W, 4) float32 [0,1]
     """
+    import time
+    start_time = time.perf_counter()
+
     if not image_batches:
         return []
 
@@ -515,11 +530,16 @@ def _render_shader_batch(
     # Detect how many outputs the shader actually uses
     num_outputs = _detect_output_count(fragment_code)
 
+    # Detect multi-pass rendering
+    num_passes = _detect_pass_count(fragment_code)
+
     # Track resources for cleanup
     program = None
     fbo = None
     output_textures = []
     input_textures = []
+    ping_pong_textures = []
+    ping_pong_fbos = []
 
     num_inputs = len(image_batches[0])
 
@@ -553,6 +573,27 @@ def _render_shader_batch(
         if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
             raise RuntimeError("Framebuffer is not complete")
 
+        # Create ping-pong resources for multi-pass rendering
+        if num_passes > 1:
+            for _ in range(2):
+                pp_tex = gl.glGenTextures(1)
+                ping_pong_textures.append(pp_tex)
+                gl.glBindTexture(gl.GL_TEXTURE_2D, pp_tex)
+                gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, width, height, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+
+                pp_fbo = gl.glGenFramebuffers(1)
+                ping_pong_fbos.append(pp_fbo)
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, pp_fbo)
+                gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, pp_tex, 0)
+                gl.glDrawBuffers(1, [gl.GL_COLOR_ATTACHMENT0])
+
+                if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
+                    raise RuntimeError("Ping-pong framebuffer is not complete")
+
         # Create input textures (reused for all batches)
         for i in range(num_inputs):
             tex = gl.glGenTextures(1)
@@ -583,6 +624,9 @@ def _render_shader_batch(
             if loc >= 0:
                 gl.glUniform1i(loc, v)
 
+        # Get u_pass uniform location for multi-pass
+        pass_loc = gl.glGetUniformLocation(program, "u_pass")
+
         gl.glViewport(0, 0, width, height)
         gl.glDisable(gl.GL_BLEND)  # Ensure no alpha blending - write output directly
 
@@ -605,10 +649,44 @@ def _render_shader_batch(
 
                 gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, w, h, 0, gl.GL_RGBA, gl.GL_FLOAT, img_upload)
 
-            # Render
-            gl.glClearColor(0, 0, 0, 0)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
+            if num_passes == 1:
+                # Single pass - render directly to output FBO
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
+                if pass_loc >= 0:
+                    gl.glUniform1i(pass_loc, 0)
+                gl.glClearColor(0, 0, 0, 0)
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
+            else:
+                # Multi-pass rendering with ping-pong
+                for p in range(num_passes):
+                    is_last_pass = (p == num_passes - 1)
+
+                    # Set pass uniform
+                    if pass_loc >= 0:
+                        gl.glUniform1i(pass_loc, p)
+
+                    if is_last_pass:
+                        # Last pass renders to the main output FBO
+                        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
+                    else:
+                        # Intermediate passes render to ping-pong FBO
+                        target_fbo = ping_pong_fbos[p % 2]
+                        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
+
+                    # Set input texture for this pass
+                    gl.glActiveTexture(gl.GL_TEXTURE0)
+                    if p == 0:
+                        # First pass reads from original input
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, input_textures[0])
+                    else:
+                        # Subsequent passes read from previous pass output
+                        source_tex = ping_pong_textures[(p - 1) % 2]
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, source_tex)
+
+                    gl.glClearColor(0, 0, 0, 0)
+                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                    gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
 
             # Read back outputs for this batch
             # (glGetTexImage is synchronous, implicitly waits for rendering)
@@ -626,6 +704,11 @@ def _render_shader_batch(
 
             all_batch_outputs.append(batch_outputs)
 
+        elapsed = (time.perf_counter() - start_time) * 1000
+        num_batches = len(image_batches)
+        pass_info = f", {num_passes} passes" if num_passes > 1 else ""
+        logger.info(f"GLSL shader executed in {elapsed:.1f}ms ({num_batches} batch{'es' if num_batches != 1 else ''}, {width}x{height}{pass_info})")
+
         return all_batch_outputs
 
     finally:
@@ -637,8 +720,12 @@ def _render_shader_batch(
             gl.glDeleteTextures(len(input_textures), input_textures)
         if output_textures:
             gl.glDeleteTextures(len(output_textures), output_textures)
+        if ping_pong_textures:
+            gl.glDeleteTextures(len(ping_pong_textures), ping_pong_textures)
         if fbo is not None:
             gl.glDeleteFramebuffers(1, [fbo])
+        for pp_fbo in ping_pong_fbos:
+            gl.glDeleteFramebuffers(1, [pp_fbo])
         if program is not None:
             gl.glDeleteProgram(program)
 
