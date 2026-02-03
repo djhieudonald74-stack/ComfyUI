@@ -644,6 +644,11 @@ def register_replacements():
     register_replacements_longeredge()
     register_replacements_batchimages()
     register_replacements_upscaleimage()
+    register_replacements_controlnet()
+    register_replacements_load3d()
+    register_replacements_preview3d()
+    register_replacements_svdimg2vid()
+    register_replacements_conditioningavg()
 
 def register_replacements_longeredge():
     # No dynamic inputs here
@@ -683,6 +688,44 @@ def register_replacements_upscaleimage():
                 node_replace.InputMap(new_id="resize_type.multiplier", assign=node_replace.InputMap.OldId("scale_by")),
                 node_replace.InputMap(new_id="scale_method", assign=node_replace.InputMap.OldId("upscale_method")),
             ],
+        ))
+
+def register_replacements_controlnet():
+    # T2IAdapterLoader → ControlNetLoader
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="ControlNetLoader",
+            old_node_id="T2IAdapterLoader",
+            input_mapping=[
+                node_replace.InputMap(new_id="control_net_name", assign=node_replace.InputMap.OldId("t2i_adapter_name")),
+            ],
+        ))
+
+def register_replacements_load3d():
+    # Load3DAnimation merged into Load3D
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="Load3D",
+            old_node_id="Load3DAnimation",
+        ))
+
+def register_replacements_preview3d():
+    # Preview3DAnimation merged into Preview3D
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="Preview3D",
+            old_node_id="Preview3DAnimation",
+        ))
+
+def register_replacements_svdimg2vid():
+    # Typo fix: SDV → SVD
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="SVD_img2vid_Conditioning",
+            old_node_id="SDV_img2vid_Conditioning",
+        ))
+
+def register_replacements_conditioningavg():
+    # Typo fix: trailing space in node name
+    node_replace.register_node_replacement(node_replace.NodeReplace(
+            new_node_id="ConditioningAverage",
+            old_node_id="ConditioningAverage ",
         ))
 
 class PostProcessingExtension(ComfyExtension):
