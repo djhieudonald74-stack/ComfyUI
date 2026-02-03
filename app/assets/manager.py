@@ -1,3 +1,12 @@
+"""
+Asset manager - thin API adapter layer.
+
+This module transforms API schemas to/from service layer calls.
+It should NOT contain business logic or direct SQLAlchemy usage.
+
+Architecture:
+  API Routes -> manager.py (schema transformation) -> services/ (business logic) -> queries/ (DB ops)
+"""
 import os
 import mimetypes
 import contextlib
@@ -7,27 +16,31 @@ from app.database.db import create_session
 from app.assets.api import schemas_out, schemas_in
 from app.assets.database.queries import (
     asset_exists_by_hash,
-    asset_info_exists_for_asset_id,
+    fetch_asset_info_and_asset,
+    fetch_asset_info_asset_and_tags,
     get_asset_by_hash,
     get_asset_info_by_id,
-    fetch_asset_info_asset_and_tags,
-    fetch_asset_info_and_asset,
-    create_asset_info_for_existing_asset,
-    touch_asset_info_by_id,
-    update_asset_info_full,
-    delete_asset_info_by_id,
-    list_cache_states_by_asset_id,
-    list_asset_infos_page,
-    list_tags_with_usage,
     get_asset_tags,
-    add_tags_to_asset_info,
-    remove_tags_from_asset_info,
-    pick_best_live_path,
-    ingest_fs_asset,
-    set_asset_info_preview,
+    list_asset_infos_page,
+    list_cache_states_by_asset_id,
+    touch_asset_info_by_id,
 )
-from app.assets.helpers import resolve_destination_from_tags, ensure_within_base
-from app.assets.database.models import Asset
+from app.assets.helpers import (
+    ensure_within_base,
+    pick_best_live_path,
+    resolve_destination_from_tags,
+)
+from app.assets.services import (
+    apply_tags,
+    delete_asset_reference as svc_delete_asset_reference,
+    get_asset_detail,
+    ingest_file_from_path,
+    register_existing_asset,
+    remove_tags,
+    set_asset_preview as svc_set_asset_preview,
+    update_asset_metadata,
+)
+from app.assets.services.tagging import list_tags as svc_list_tags
 
 
 def _safe_sort_field(requested: str | None) -> str:
@@ -52,9 +65,6 @@ def _safe_filename(name: str | None, fallback: str) -> str:
 
 
 def asset_exists(*, asset_hash: str) -> bool:
-    """
-    Check if an asset with a given hash exists in database.
-    """
     with create_session() as session:
         return asset_exists_by_hash(session, asset_hash=asset_hash)
 
@@ -118,12 +128,13 @@ def get_asset(
     asset_info_id: str,
     owner_id: str = "",
 ) -> schemas_out.AssetDetail:
-    with create_session() as session:
-        res = fetch_asset_info_asset_and_tags(session, asset_info_id=asset_info_id, owner_id=owner_id)
-        if not res:
-            raise ValueError(f"AssetInfo {asset_info_id} not found")
-        info, asset, tag_names = res
-        preview_id = info.preview_id
+    result = get_asset_detail(asset_info_id=asset_info_id, owner_id=owner_id)
+    if not result:
+        raise ValueError(f"AssetInfo {asset_info_id} not found")
+
+    info = result["info"]
+    asset = result["asset"]
+    tag_names = result["tags"]
 
     return schemas_out.AssetDetail(
         id=info.id,
@@ -133,7 +144,7 @@ def get_asset(
         mime_type=asset.mime_type if asset else None,
         tags=tag_names,
         user_metadata=info.user_metadata or {},
-        preview_id=preview_id,
+        preview_id=info.preview_id,
         created_at=info.created_at,
         last_access_time=info.last_access_time,
     )
@@ -171,11 +182,7 @@ def upload_asset_from_temp_path(
     owner_id: str = "",
     expected_asset_hash: str | None = None,
 ) -> schemas_out.AssetCreated:
-    """
-    Create new asset or update existing asset from a temporary file path.
-    """
     try:
-        # NOTE: blake3 is not required right now, so this will fail if blake3 is not installed in local environment
         import app.assets.hashing as hashing
         digest = hashing.blake3_hash(temp_path)
     except Exception as e:
@@ -185,40 +192,43 @@ def upload_asset_from_temp_path(
     if expected_asset_hash and asset_hash != expected_asset_hash.strip().lower():
         raise ValueError("HASH_MISMATCH")
 
+    # Check if asset already exists by hash
     with create_session() as session:
         existing = get_asset_by_hash(session, asset_hash=asset_hash)
-        if existing is not None:
-            with contextlib.suppress(Exception):
-                if temp_path and os.path.exists(temp_path):
-                    os.remove(temp_path)
 
-            display_name = _safe_filename(spec.name or (client_filename or ""), fallback=digest)
-            info = create_asset_info_for_existing_asset(
-                session,
-                asset_hash=asset_hash,
-                name=display_name,
-                user_metadata=spec.user_metadata or {},
-                tags=spec.tags or [],
-                tag_origin="manual",
-                owner_id=owner_id,
-            )
-            tag_names = get_asset_tags(session, asset_info_id=info.id)
-            session.commit()
+    if existing is not None:
+        with contextlib.suppress(Exception):
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
-            return schemas_out.AssetCreated(
-                id=info.id,
-                name=info.name,
-                asset_hash=existing.hash,
-                size=int(existing.size_bytes) if existing.size_bytes is not None else None,
-                mime_type=existing.mime_type,
-                tags=tag_names,
-                user_metadata=info.user_metadata or {},
-                preview_id=info.preview_id,
-                created_at=info.created_at,
-                last_access_time=info.last_access_time,
-                created_new=False,
-            )
+        display_name = _safe_filename(spec.name or (client_filename or ""), fallback=digest)
+        result = register_existing_asset(
+            asset_hash=asset_hash,
+            name=display_name,
+            user_metadata=spec.user_metadata or {},
+            tags=spec.tags or [],
+            tag_origin="manual",
+            owner_id=owner_id,
+        )
+        info = result["info"]
+        asset = result["asset"]
+        tag_names = result["tags"]
 
+        return schemas_out.AssetCreated(
+            id=info.id,
+            name=info.name,
+            asset_hash=asset.hash,
+            size=int(asset.size_bytes) if asset.size_bytes is not None else None,
+            mime_type=asset.mime_type,
+            tags=tag_names,
+            user_metadata=info.user_metadata or {},
+            preview_id=info.preview_id,
+            created_at=info.created_at,
+            last_access_time=info.last_access_time,
+            created_new=False,
+        )
+
+    # New asset - move file to destination
     base_dir, subdirs = resolve_destination_from_tags(spec.tags)
     dest_dir = os.path.join(base_dir, *subdirs) if subdirs else base_dir
     os.makedirs(dest_dir, exist_ok=True)
@@ -246,47 +256,44 @@ def upload_asset_from_temp_path(
     except OSError as e:
         raise RuntimeError(f"failed to stat destination file: {e}")
 
-    with create_session() as session:
-        result = ingest_fs_asset(
-            session,
-            asset_hash=asset_hash,
-            abs_path=dest_abs,
-            size_bytes=size_bytes,
-            mtime_ns=mtime_ns,
-            mime_type=content_type,
-            info_name=_safe_filename(spec.name or (client_filename or ""), fallback=digest),
-            owner_id=owner_id,
-            preview_id=None,
-            user_metadata=spec.user_metadata or {},
-            tags=spec.tags,
-            tag_origin="manual",
-            require_existing_tags=False,
-        )
-        info_id = result["asset_info_id"]
-        if not info_id:
-            raise RuntimeError("failed to create asset metadata")
+    result = ingest_file_from_path(
+        asset_hash=asset_hash,
+        abs_path=dest_abs,
+        size_bytes=size_bytes,
+        mtime_ns=mtime_ns,
+        mime_type=content_type,
+        info_name=_safe_filename(spec.name or (client_filename or ""), fallback=digest),
+        owner_id=owner_id,
+        preview_id=None,
+        user_metadata=spec.user_metadata or {},
+        tags=spec.tags,
+        tag_origin="manual",
+        require_existing_tags=False,
+    )
+    info_id = result["asset_info_id"]
+    if not info_id:
+        raise RuntimeError("failed to create asset metadata")
 
+    with create_session() as session:
         pair = fetch_asset_info_and_asset(session, asset_info_id=info_id, owner_id=owner_id)
         if not pair:
             raise RuntimeError("inconsistent DB state after ingest")
         info, asset = pair
         tag_names = get_asset_tags(session, asset_info_id=info.id)
-        created_result = schemas_out.AssetCreated(
-            id=info.id,
-            name=info.name,
-            asset_hash=asset.hash,
-            size=int(asset.size_bytes),
-            mime_type=asset.mime_type,
-            tags=tag_names,
-            user_metadata=info.user_metadata or {},
-            preview_id=info.preview_id,
-            created_at=info.created_at,
-            last_access_time=info.last_access_time,
-            created_new=result["asset_created"],
-        )
-        session.commit()
 
-    return created_result
+    return schemas_out.AssetCreated(
+        id=info.id,
+        name=info.name,
+        asset_hash=asset.hash,
+        size=int(asset.size_bytes),
+        mime_type=asset.mime_type,
+        tags=tag_names,
+        user_metadata=info.user_metadata or {},
+        preview_id=info.preview_id,
+        created_at=info.created_at,
+        last_access_time=info.last_access_time,
+        created_new=result["asset_created"],
+    )
 
 
 def update_asset(
@@ -297,35 +304,26 @@ def update_asset(
     user_metadata: dict | None = None,
     owner_id: str = "",
 ) -> schemas_out.AssetUpdated:
-    with create_session() as session:
-        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
-        if not info_row:
-            raise ValueError(f"AssetInfo {asset_info_id} not found")
-        if info_row.owner_id and info_row.owner_id != owner_id:
-            raise PermissionError("not owner")
+    result = update_asset_metadata(
+        asset_info_id=asset_info_id,
+        name=name,
+        tags=tags,
+        user_metadata=user_metadata,
+        tag_origin="manual",
+        owner_id=owner_id,
+    )
+    info = result["info"]
+    asset = result["asset"]
+    tag_names = result["tags"]
 
-        info = update_asset_info_full(
-            session,
-            asset_info_id=asset_info_id,
-            name=name,
-            tags=tags,
-            user_metadata=user_metadata,
-            tag_origin="manual",
-            asset_info_row=info_row,
-        )
-
-        tag_names = get_asset_tags(session, asset_info_id=asset_info_id)
-        result = schemas_out.AssetUpdated(
-            id=info.id,
-            name=info.name,
-            asset_hash=info.asset.hash if info.asset else None,
-            tags=tag_names,
-            user_metadata=info.user_metadata or {},
-            updated_at=info.updated_at,
-        )
-        session.commit()
-
-    return result
+    return schemas_out.AssetUpdated(
+        id=info.id,
+        name=info.name,
+        asset_hash=asset.hash if asset else None,
+        tags=tag_names,
+        user_metadata=info.user_metadata or {},
+        updated_at=info.updated_at,
+    )
 
 
 def set_asset_preview(
@@ -334,71 +332,35 @@ def set_asset_preview(
     preview_asset_id: str | None = None,
     owner_id: str = "",
 ) -> schemas_out.AssetDetail:
-    with create_session() as session:
-        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
-        if not info_row:
-            raise ValueError(f"AssetInfo {asset_info_id} not found")
-        if info_row.owner_id and info_row.owner_id != owner_id:
-            raise PermissionError("not owner")
+    result = svc_set_asset_preview(
+        asset_info_id=asset_info_id,
+        preview_asset_id=preview_asset_id,
+        owner_id=owner_id,
+    )
+    info = result["info"]
+    asset = result["asset"]
+    tags = result["tags"]
 
-        set_asset_info_preview(
-            session,
-            asset_info_id=asset_info_id,
-            preview_asset_id=preview_asset_id,
-        )
-
-        res = fetch_asset_info_asset_and_tags(session, asset_info_id=asset_info_id, owner_id=owner_id)
-        if not res:
-            raise RuntimeError("State changed during preview update")
-        info, asset, tags = res
-        result = schemas_out.AssetDetail(
-            id=info.id,
-            name=info.name,
-            asset_hash=asset.hash if asset else None,
-            size=int(asset.size_bytes) if asset and asset.size_bytes is not None else None,
-            mime_type=asset.mime_type if asset else None,
-            tags=tags,
-            user_metadata=info.user_metadata or {},
-            preview_id=info.preview_id,
-            created_at=info.created_at,
-            last_access_time=info.last_access_time,
-        )
-        session.commit()
-
-    return result
+    return schemas_out.AssetDetail(
+        id=info.id,
+        name=info.name,
+        asset_hash=asset.hash if asset else None,
+        size=int(asset.size_bytes) if asset and asset.size_bytes is not None else None,
+        mime_type=asset.mime_type if asset else None,
+        tags=tags,
+        user_metadata=info.user_metadata or {},
+        preview_id=info.preview_id,
+        created_at=info.created_at,
+        last_access_time=info.last_access_time,
+    )
 
 
 def delete_asset_reference(*, asset_info_id: str, owner_id: str, delete_content_if_orphan: bool = True) -> bool:
-    with create_session() as session:
-        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
-        asset_id = info_row.asset_id if info_row else None
-        deleted = delete_asset_info_by_id(session, asset_info_id=asset_info_id, owner_id=owner_id)
-        if not deleted:
-            session.commit()
-            return False
-
-        if not delete_content_if_orphan or not asset_id:
-            session.commit()
-            return True
-
-        still_exists = asset_info_exists_for_asset_id(session, asset_id=asset_id)
-        if still_exists:
-            session.commit()
-            return True
-
-        states = list_cache_states_by_asset_id(session, asset_id=asset_id)
-        file_paths = [s.file_path for s in (states or []) if getattr(s, "file_path", None)]
-
-        asset_row = session.get(Asset, asset_id)
-        if asset_row is not None:
-            session.delete(asset_row)
-
-        session.commit()
-        for p in file_paths:
-            with contextlib.suppress(Exception):
-                if p and os.path.isfile(p):
-                    os.remove(p)
-    return True
+    return svc_delete_asset_reference(
+        asset_info_id=asset_info_id,
+        owner_id=owner_id,
+        delete_content_if_orphan=delete_content_if_orphan,
+    )
 
 
 def create_asset_from_hash(
@@ -410,37 +372,37 @@ def create_asset_from_hash(
     owner_id: str = "",
 ) -> schemas_out.AssetCreated | None:
     canonical = hash_str.strip().lower()
+
     with create_session() as session:
         asset = get_asset_by_hash(session, asset_hash=canonical)
         if not asset:
             return None
 
-        info = create_asset_info_for_existing_asset(
-            session,
-            asset_hash=canonical,
-            name=_safe_filename(name, fallback=canonical.split(":", 1)[1]),
-            user_metadata=user_metadata or {},
-            tags=tags or [],
-            tag_origin="manual",
-            owner_id=owner_id,
-        )
-        tag_names = get_asset_tags(session, asset_info_id=info.id)
-        result = schemas_out.AssetCreated(
-            id=info.id,
-            name=info.name,
-            asset_hash=asset.hash,
-            size=int(asset.size_bytes),
-            mime_type=asset.mime_type,
-            tags=tag_names,
-            user_metadata=info.user_metadata or {},
-            preview_id=info.preview_id,
-            created_at=info.created_at,
-            last_access_time=info.last_access_time,
-            created_new=False,
-        )
-        session.commit()
+    result = register_existing_asset(
+        asset_hash=canonical,
+        name=_safe_filename(name, fallback=canonical.split(":", 1)[1] if ":" in canonical else canonical),
+        user_metadata=user_metadata or {},
+        tags=tags or [],
+        tag_origin="manual",
+        owner_id=owner_id,
+    )
+    info = result["info"]
+    asset = result["asset"]
+    tag_names = result["tags"]
 
-    return result
+    return schemas_out.AssetCreated(
+        id=info.id,
+        name=info.name,
+        asset_hash=asset.hash,
+        size=int(asset.size_bytes),
+        mime_type=asset.mime_type,
+        tags=tag_names,
+        user_metadata=info.user_metadata or {},
+        preview_id=info.preview_id,
+        created_at=info.created_at,
+        last_access_time=info.last_access_time,
+        created_new=result["created"],
+    )
 
 
 def add_tags_to_asset(
@@ -450,21 +412,12 @@ def add_tags_to_asset(
     origin: str = "manual",
     owner_id: str = "",
 ) -> schemas_out.TagsAdd:
-    with create_session() as session:
-        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
-        if not info_row:
-            raise ValueError(f"AssetInfo {asset_info_id} not found")
-        if info_row.owner_id and info_row.owner_id != owner_id:
-            raise PermissionError("not owner")
-        data = add_tags_to_asset_info(
-            session,
-            asset_info_id=asset_info_id,
-            tags=tags,
-            origin=origin,
-            create_if_missing=True,
-            asset_info_row=info_row,
-        )
-        session.commit()
+    data = apply_tags(
+        asset_info_id=asset_info_id,
+        tags=tags,
+        origin=origin,
+        owner_id=owner_id,
+    )
     return schemas_out.TagsAdd(**data)
 
 
@@ -474,19 +427,11 @@ def remove_tags_from_asset(
     tags: list[str],
     owner_id: str = "",
 ) -> schemas_out.TagsRemove:
-    with create_session() as session:
-        info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
-        if not info_row:
-            raise ValueError(f"AssetInfo {asset_info_id} not found")
-        if info_row.owner_id and info_row.owner_id != owner_id:
-            raise PermissionError("not owner")
-
-        data = remove_tags_from_asset_info(
-            session,
-            asset_info_id=asset_info_id,
-            tags=tags,
-        )
-        session.commit()
+    data = remove_tags(
+        asset_info_id=asset_info_id,
+        tags=tags,
+        owner_id=owner_id,
+    )
     return schemas_out.TagsRemove(**data)
 
 
@@ -498,19 +443,14 @@ def list_tags(
     include_zero: bool = True,
     owner_id: str = "",
 ) -> schemas_out.TagsList:
-    limit = max(1, min(1000, limit))
-    offset = max(0, offset)
-
-    with create_session() as session:
-        rows, total = list_tags_with_usage(
-            session,
-            prefix=prefix,
-            limit=limit,
-            offset=offset,
-            include_zero=include_zero,
-            order=order,
-            owner_id=owner_id,
-        )
+    rows, total = svc_list_tags(
+        prefix=prefix,
+        limit=limit,
+        offset=offset,
+        order=order,
+        include_zero=include_zero,
+        owner_id=owner_id,
+    )
 
     tags = [schemas_out.TagUsage(name=name, count=count, type=tag_type) for (name, tag_type, count) in rows]
     return schemas_out.TagsList(tags=tags, total=total, has_more=(offset + len(tags)) < total)

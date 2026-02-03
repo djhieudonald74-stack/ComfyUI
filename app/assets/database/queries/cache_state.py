@@ -21,20 +21,47 @@ def list_cache_states_by_asset_id(
     ).scalars().all()
 
 
-def pick_best_live_path(states: Sequence[AssetCacheState]) -> str:
-    """
-    Return the best on-disk path among cache states:
-      1) Prefer a path that exists with needs_verify == False (already verified).
-      2) Otherwise, pick the first path that exists.
-      3) Otherwise return empty string.
-    """
-    alive = [s for s in states if getattr(s, "file_path", None) and os.path.isfile(s.file_path)]
-    if not alive:
-        return ""
-    for s in alive:
-        if not getattr(s, "needs_verify", False):
-            return s.file_path
-    return alive[0].file_path
+def upsert_cache_state(
+    session: Session,
+    *,
+    asset_id: str,
+    file_path: str,
+    mtime_ns: int,
+) -> tuple[bool, bool]:
+    """Upsert a cache state by file_path. Returns (created, updated)."""
+    from sqlalchemy.dialects import sqlite
+
+    vals = {
+        "asset_id": asset_id,
+        "file_path": file_path,
+        "mtime_ns": int(mtime_ns),
+    }
+    ins = (
+        sqlite.insert(AssetCacheState)
+        .values(**vals)
+        .on_conflict_do_nothing(index_elements=[AssetCacheState.file_path])
+    )
+    res = session.execute(ins)
+    created = int(res.rowcount or 0) > 0
+
+    if created:
+        return True, False
+
+    upd = (
+        sa.update(AssetCacheState)
+        .where(AssetCacheState.file_path == file_path)
+        .where(
+            sa.or_(
+                AssetCacheState.asset_id != asset_id,
+                AssetCacheState.mtime_ns.is_(None),
+                AssetCacheState.mtime_ns != int(mtime_ns),
+            )
+        )
+        .values(asset_id=asset_id, mtime_ns=int(mtime_ns))
+    )
+    res2 = session.execute(upd)
+    updated = int(res2.rowcount or 0) > 0
+    return False, updated
 
 
 def prune_orphaned_assets(session: Session, roots: tuple[str, ...], prefixes_for_root_fn) -> int:

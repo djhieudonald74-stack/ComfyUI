@@ -1,29 +1,30 @@
 # Re-export public API from query modules
-# Maintains backward compatibility with old flat queries.py imports
+# Pure atomic database queries only - no business logic or orchestration
 
 from app.assets.database.queries.asset import (
     asset_exists_by_hash,
     get_asset_by_hash,
+    upsert_asset,
 )
 
 from app.assets.database.queries.asset_info import (
     asset_info_exists_for_asset_id,
     get_asset_info_by_id,
+    insert_asset_info,
+    get_or_create_asset_info,
+    update_asset_info_timestamps,
     list_asset_infos_page,
     fetch_asset_info_asset_and_tags,
     fetch_asset_info_and_asset,
     touch_asset_info_by_id,
-    create_asset_info_for_existing_asset,
     replace_asset_info_metadata_projection,
-    ingest_fs_asset,
-    update_asset_info_full,
     delete_asset_info_by_id,
     set_asset_info_preview,
 )
 
 from app.assets.database.queries.cache_state import (
     list_cache_states_by_asset_id,
-    pick_best_live_path,
+    upsert_cache_state,
     prune_orphaned_assets,
     fast_db_consistency_pass,
 )
@@ -43,22 +44,23 @@ __all__ = [
     # asset.py
     "asset_exists_by_hash",
     "get_asset_by_hash",
+    "upsert_asset",
     # asset_info.py
     "asset_info_exists_for_asset_id",
     "get_asset_info_by_id",
+    "insert_asset_info",
+    "get_or_create_asset_info",
+    "update_asset_info_timestamps",
     "list_asset_infos_page",
     "fetch_asset_info_asset_and_tags",
     "fetch_asset_info_and_asset",
     "touch_asset_info_by_id",
-    "create_asset_info_for_existing_asset",
     "replace_asset_info_metadata_projection",
-    "ingest_fs_asset",
-    "update_asset_info_full",
     "delete_asset_info_by_id",
     "set_asset_info_preview",
     # cache_state.py
     "list_cache_states_by_asset_id",
-    "pick_best_live_path",
+    "upsert_cache_state",
     "prune_orphaned_assets",
     "fast_db_consistency_pass",
     # tags.py

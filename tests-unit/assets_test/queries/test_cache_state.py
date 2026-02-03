@@ -2,10 +2,8 @@
 from sqlalchemy.orm import Session
 
 from app.assets.database.models import Asset, AssetCacheState
-from app.assets.database.queries import (
-    list_cache_states_by_asset_id,
-    pick_best_live_path,
-)
+from app.assets.database.queries import list_cache_states_by_asset_id
+from app.assets.helpers import pick_best_live_path
 
 
 def _make_asset(session: Session, hash_val: str | None = None, size: int = 1024) -> Asset:
