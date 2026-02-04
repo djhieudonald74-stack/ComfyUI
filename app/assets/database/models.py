@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-
 from typing import Any
+
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from app.assets.helpers import get_utc_now
-from app.database.models import to_dict, Base
+from app.database.models import Base, to_dict
 
 
 class Asset(Base):

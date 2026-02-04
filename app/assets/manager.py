@@ -7,17 +7,16 @@ It should NOT contain business logic or direct SQLAlchemy usage.
 Architecture:
   API Routes -> manager.py (schema transformation) -> services/ (business logic) -> queries/ (DB ops)
 """
-import os
-import mimetypes
 import contextlib
+import mimetypes
+import os
 from typing import Sequence
 
 from pydantic import ValidationError
 
-import folder_paths
 import app.assets.services.hashing as hashing
-from app.database.db import create_session
-from app.assets.api import schemas_out, schemas_in
+import folder_paths
+from app.assets.api import schemas_in, schemas_out
 from app.assets.api.schemas_in import (
     AssetNotFoundError,
     AssetValidationError,
@@ -36,21 +35,26 @@ from app.assets.database.queries import (
     update_asset_info_access_time,
 )
 from app.assets.helpers import select_best_live_path
-from app.assets.services.path_utils import (
-    validate_path_within_base,
-    resolve_destination_from_tags,
-)
 from app.assets.services import (
     apply_tags,
-    delete_asset_reference as svc_delete_asset_reference,
     get_asset_detail,
     ingest_file_from_path,
     register_existing_asset,
     remove_tags,
-    set_asset_preview as svc_set_asset_preview,
     update_asset_metadata,
 )
+from app.assets.services import (
+    delete_asset_reference as svc_delete_asset_reference,
+)
+from app.assets.services import (
+    set_asset_preview as svc_set_asset_preview,
+)
+from app.assets.services.path_utils import (
+    resolve_destination_from_tags,
+    validate_path_within_base,
+)
 from app.assets.services.tagging import list_tags as svc_list_tags
+from app.database.db import create_session
 
 
 def _validate_sort_field(requested: str | None) -> str:

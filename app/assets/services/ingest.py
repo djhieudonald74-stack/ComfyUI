@@ -12,16 +12,10 @@ from typing import Sequence
 from sqlalchemy import select
 
 from app.assets.database.models import Asset, Tag
-from app.database.db import create_session
-from app.assets.helpers import normalize_tags, select_best_live_path
-from app.assets.services.path_utils import compute_relative_filename
-from app.assets.services.schemas import (
-    RegisterAssetResult,
-    extract_asset_data,
-    extract_info_data,
-)
 from app.assets.database.queries import (
+    add_tags_to_asset_info,
     get_asset_by_hash,
+    get_asset_tags,
     get_or_create_asset_info,
     list_cache_states_by_asset_id,
     remove_missing_tag_for_asset_id,
@@ -30,9 +24,15 @@ from app.assets.database.queries import (
     update_asset_info_timestamps,
     upsert_asset,
     upsert_cache_state,
-    add_tags_to_asset_info,
-    get_asset_tags,
 )
+from app.assets.helpers import normalize_tags, select_best_live_path
+from app.assets.services.path_utils import compute_relative_filename
+from app.assets.services.schemas import (
+    RegisterAssetResult,
+    extract_asset_data,
+    extract_info_data,
+)
+from app.database.db import create_session
 
 
 def ingest_file_from_path(

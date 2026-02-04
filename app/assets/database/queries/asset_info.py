@@ -10,15 +10,19 @@ from decimal import Decimal
 from typing import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy import select, delete, exists
+from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, contains_eager, noload
 
 from app.assets.database.models import (
-    Asset, AssetInfo, AssetInfoMeta, AssetInfoTag, Tag
+    Asset,
+    AssetInfo,
+    AssetInfoMeta,
+    AssetInfoTag,
+    Tag,
 )
-from app.assets.helpers import escape_sql_like_string, normalize_tags, get_utc_now
+from app.assets.helpers import escape_sql_like_string, get_utc_now, normalize_tags
 
 
 def check_is_scalar(v):

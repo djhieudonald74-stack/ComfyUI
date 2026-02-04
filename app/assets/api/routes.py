@@ -1,9 +1,10 @@
 import logging
-import uuid
-import urllib.parse
 import os
-from aiohttp import web
+import urllib.parse
+import uuid
+from typing import Any
 
+from aiohttp import web
 from pydantic import ValidationError
 
 import app.assets.manager as manager
@@ -18,8 +19,6 @@ from app.assets.api.schemas_in import (
 )
 from app.assets.api.upload import parse_multipart_upload
 from app.assets.scanner import seed_assets as scanner_seed_assets
-from typing import Any
-
 
 ROUTES = web.RouteTableDef()
 USER_MANAGER: user_manager.UserManager | None = None

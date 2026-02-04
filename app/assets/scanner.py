@@ -5,26 +5,26 @@ import time
 import uuid
 from typing import Literal
 
-import folder_paths
 from sqlalchemy.orm import Session
 
+import folder_paths
 from app.assets.database.queries import (
     add_missing_tag_for_asset_id,
-    ensure_tags_exist,
-    remove_missing_tag_for_asset_id,
-    delete_cache_states_outside_prefixes,
-    get_orphaned_seed_asset_ids,
-    delete_assets_by_ids,
-    get_cache_states_for_prefixes,
-    bulk_set_needs_verify,
-    delete_cache_states_by_ids,
-    delete_orphaned_seed_asset,
+    bulk_insert_asset_infos_ignore_conflicts,
     bulk_insert_assets,
     bulk_insert_cache_states_ignore_conflicts,
-    get_cache_states_by_paths_and_asset_ids,
-    bulk_insert_asset_infos_ignore_conflicts,
-    get_asset_info_ids_by_ids,
     bulk_insert_tags_and_meta,
+    bulk_set_needs_verify,
+    delete_assets_by_ids,
+    delete_cache_states_by_ids,
+    delete_cache_states_outside_prefixes,
+    delete_orphaned_seed_asset,
+    ensure_tags_exist,
+    get_asset_info_ids_by_ids,
+    get_cache_states_by_paths_and_asset_ids,
+    get_cache_states_for_prefixes,
+    get_orphaned_seed_asset_ids,
+    remove_missing_tag_for_asset_id,
 )
 from app.assets.helpers import get_utc_now
 from app.assets.services.path_utils import (
@@ -33,7 +33,6 @@ from app.assets.services.path_utils import (
     get_name_and_tags_from_asset_path,
 )
 from app.database.db import create_session, dependencies_available
-
 
 RootType = Literal["models", "input", "output"]
 

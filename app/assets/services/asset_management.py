@@ -12,14 +12,6 @@ import os
 from typing import Sequence
 
 from app.assets.database.models import Asset
-from app.database.db import create_session
-from app.assets.helpers import select_best_live_path
-from app.assets.services.path_utils import compute_relative_filename
-from app.assets.services.schemas import (
-    AssetDetailResult,
-    extract_asset_data,
-    extract_info_data,
-)
 from app.assets.database.queries import (
     asset_info_exists_for_asset_id,
     delete_asset_info_by_id,
@@ -32,6 +24,14 @@ from app.assets.database.queries import (
     update_asset_info_name,
     update_asset_info_updated_at,
 )
+from app.assets.helpers import select_best_live_path
+from app.assets.services.path_utils import compute_relative_filename
+from app.assets.services.schemas import (
+    AssetDetailResult,
+    extract_asset_data,
+    extract_info_data,
+)
+from app.database.db import create_session
 
 
 def get_asset_detail(

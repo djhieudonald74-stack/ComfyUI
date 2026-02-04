@@ -6,13 +6,13 @@ Business logic for:
 - remove_tags: Remove tags from an asset
 - list_tags: List tags with usage counts
 """
-from app.database.db import create_session
 from app.assets.database.queries import (
     add_tags_to_asset_info,
     get_asset_info_by_id,
     list_tags_with_usage,
     remove_tags_from_asset_info,
 )
+from app.database.db import create_session
 
 
 def apply_tags(

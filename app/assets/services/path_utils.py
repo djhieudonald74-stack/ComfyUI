@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Literal
 
 import folder_paths
-
 from app.assets.helpers import normalize_tags
 
 
