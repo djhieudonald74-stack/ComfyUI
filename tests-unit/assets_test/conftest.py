@@ -259,9 +259,3 @@ def autoclean_unit_test_assets(http: requests.Session, api_base: str):
         for aid in ids:
             with contextlib.suppress(Exception):
                 http.delete(f"{api_base}/api/assets/{aid}", timeout=30)
-
-
-# Re-export helpers for backwards compatibility with any external imports
-from helpers import trigger_sync_seed_assets, get_asset_filename
-
-__all__ = ["trigger_sync_seed_assets", "get_asset_filename"]
