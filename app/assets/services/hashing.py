@@ -2,37 +2,15 @@ import asyncio
 import os
 from typing import IO
 
-try:
-    from blake3 import blake3
-except ImportError:
-    blake3 = None  # type: ignore[misc, assignment]
+from blake3 import blake3
+
+DEFAULT_CHUNK = 8 * 1024 * 1024
 
 
-DEFAULT_CHUNK = 8 * 1024 *1024 # 8MB
-
-
-def _require_blake3() -> None:
-    """Raise ImportError with helpful message if blake3 is not installed."""
-    if blake3 is None:
-        raise ImportError(
-            "blake3 is required for asset hashing but is not installed. "
-            "Install it with: pip install blake3"
-        )
-
-# NOTE: this allows hashing different representations of a file-like object
 def compute_blake3_hash(
     fp: str | IO[bytes],
     chunk_size: int = DEFAULT_CHUNK,
 ) -> str:
-    """
-    Returns a BLAKE3 hex digest for ``fp``, which may be:
-      - a filename (str/bytes) or PathLike
-      - an open binary file object
-    If ``fp`` is a file object, it must be opened in **binary** mode and support
-    ``read``, ``seek``, and ``tell``. The function will seek to the start before
-    reading and will attempt to restore the original position afterward.
-    """
-    # duck typing to check if input is a file-like object
     if hasattr(fp, "read"):
         return _hash_file_obj(fp, chunk_size)
 
@@ -44,10 +22,6 @@ async def compute_compute_blake3_hash_async(
     fp: str | IO[bytes],
     chunk_size: int = DEFAULT_CHUNK,
 ) -> str:
-    """Async wrapper for ``compute_blake3_hash_sync``.
-    Uses a worker thread so the event loop remains responsive.
-    """
-    # If it is a path, open inside the worker thread to keep I/O off the loop.
     if hasattr(fp, "read"):
         return await asyncio.to_thread(compute_blake3_hash, fp, chunk_size)
 
@@ -59,17 +33,9 @@ async def compute_compute_blake3_hash_async(
 
 
 def _hash_file_obj(file_obj: IO, chunk_size: int = DEFAULT_CHUNK) -> str:
-    """
-    Hash an already-open binary file object by streaming in chunks.
-    - Seeks to the beginning before reading (if supported).
-    - Restores the original position afterward (if tell/seek are supported).
-    """
-    _require_blake3()
-
     if chunk_size <= 0:
         chunk_size = DEFAULT_CHUNK
 
-    # in case file object is already open and not at the beginning, track so can be restored after hashing
     orig_pos = file_obj.tell()
 
     try:
@@ -84,6 +50,5 @@ def _hash_file_obj(file_obj: IO, chunk_size: int = DEFAULT_CHUNK) -> str:
             h.update(chunk)
         return h.hexdigest()
     finally:
-        # restore original position in file object, if needed
         if orig_pos != 0:
             file_obj.seek(orig_pos)
