@@ -163,8 +163,8 @@ class TestRegisterExistingAsset:
             tags=["models"],
         )
 
-        assert result["created"] is True
-        assert "models" in result["tags"]
+        assert result.created is True
+        assert "models" in result.tags
 
         # Verify by re-fetching from DB
         session.expire_all()
@@ -197,7 +197,7 @@ class TestRegisterExistingAsset:
             owner_id="",
         )
 
-        assert result["created"] is False
+        assert result.created is False
 
         # Verify only one AssetInfo exists for this name
         session.expire_all()
@@ -223,5 +223,5 @@ class TestRegisterExistingAsset:
             tags=["alpha", "beta"],
         )
 
-        assert result["created"] is True
-        assert set(result["tags"]) == {"alpha", "beta"}
+        assert result.created is True
+        assert set(result.tags) == {"alpha", "beta"}

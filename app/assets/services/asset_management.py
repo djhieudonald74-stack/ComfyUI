@@ -15,6 +15,11 @@ from app.assets.database.models import Asset
 from app.database.db import create_session
 from app.assets.helpers import select_best_live_path, get_utc_now
 from app.assets.services.path_utils import compute_relative_filename
+from app.assets.services.schemas import (
+    AssetDetailResult,
+    extract_asset_data,
+    extract_info_data,
+)
 from app.assets.database.queries import (
     asset_info_exists_for_asset_id,
     delete_asset_info_by_id,
@@ -30,10 +35,10 @@ from app.assets.database.queries import (
 def get_asset_detail(
     asset_info_id: str,
     owner_id: str = "",
-) -> dict | None:
+) -> AssetDetailResult | None:
     """
     Fetch full asset details including tags.
-    Returns dict with info, asset, and tags, or None if not found.
+    Returns AssetDetailResult or None if not found.
     """
     with create_session() as session:
         result = fetch_asset_info_asset_and_tags(
@@ -45,11 +50,11 @@ def get_asset_detail(
             return None
 
         info, asset, tags = result
-        return {
-            "info": info,
-            "asset": asset,
-            "tags": tags,
-        }
+        return AssetDetailResult(
+            info=extract_info_data(info),
+            asset=extract_asset_data(asset),
+            tags=tags,
+        )
 
 
 def update_asset_metadata(
@@ -59,10 +64,10 @@ def update_asset_metadata(
     user_metadata: dict | None = None,
     tag_origin: str = "manual",
     owner_id: str = "",
-) -> dict:
+) -> AssetDetailResult:
     """
     Update name, tags, and/or metadata on an AssetInfo.
-    Returns updated info dict with tags.
+    Returns AssetDetailResult with updated data.
     """
     with create_session() as session:
         info = get_asset_info_by_id(session, asset_info_id=asset_info_id)
@@ -115,17 +120,19 @@ def update_asset_metadata(
             asset_info_id=asset_info_id,
             owner_id=owner_id,
         )
-        session.commit()
-
         if not result:
             raise RuntimeError("State changed during update")
 
         info, asset, tag_list = result
-        return {
-            "info": info,
-            "asset": asset,
-            "tags": tag_list,
-        }
+        # Extract plain data before session closes
+        detail = AssetDetailResult(
+            info=extract_info_data(info),
+            asset=extract_asset_data(asset),
+            tags=tag_list,
+        )
+        session.commit()
+
+        return detail
 
 
 def delete_asset_reference(
@@ -179,10 +186,10 @@ def set_asset_preview(
     asset_info_id: str,
     preview_asset_id: str | None = None,
     owner_id: str = "",
-) -> dict:
+) -> AssetDetailResult:
     """
     Set or clear preview_id on an AssetInfo.
-    Returns updated asset detail dict.
+    Returns AssetDetailResult with updated data.
     """
     with create_session() as session:
         info_row = get_asset_info_by_id(session, asset_info_id=asset_info_id)
@@ -204,13 +211,15 @@ def set_asset_preview(
             raise RuntimeError("State changed during preview update")
 
         info, asset, tags = result
+        # Extract plain data before session closes
+        detail = AssetDetailResult(
+            info=extract_info_data(info),
+            asset=extract_asset_data(asset),
+            tags=tags,
+        )
         session.commit()
 
-        return {
-            "info": info,
-            "asset": asset,
-            "tags": tags,
-        }
+        return detail
 
 
 def _compute_filename_for_asset(session, asset_id: str) -> str | None:

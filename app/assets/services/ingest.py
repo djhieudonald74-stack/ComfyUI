@@ -15,6 +15,11 @@ from app.assets.database.models import Asset, Tag
 from app.database.db import create_session
 from app.assets.helpers import normalize_tags, select_best_live_path
 from app.assets.services.path_utils import compute_relative_filename
+from app.assets.services.schemas import (
+    RegisterAssetResult,
+    extract_asset_data,
+    extract_info_data,
+)
 from app.assets.database.queries import (
     get_asset_by_hash,
     get_or_create_asset_info,
@@ -143,11 +148,11 @@ def register_existing_asset(
     tags: list[str] | None = None,
     tag_origin: str = "manual",
     owner_id: str = "",
-) -> dict:
+) -> RegisterAssetResult:
     """
     Create or return existing AssetInfo for an asset that already exists by hash.
-
-    Returns dict with asset and info details, or raises ValueError if hash not found.
+    Returns RegisterAssetResult with plain data.
+    Raises ValueError if hash not found.
     """
     with create_session() as session:
         asset = get_asset_by_hash(session, asset_hash=asset_hash)
@@ -165,13 +170,15 @@ def register_existing_asset(
         if not info_created:
             # Return existing info
             tag_names = get_asset_tags(session, asset_info_id=info.id)
+            # Extract plain data before session closes
+            result = RegisterAssetResult(
+                info=extract_info_data(info),
+                asset=extract_asset_data(asset),
+                tags=tag_names,
+                created=False,
+            )
             session.commit()
-            return {
-                "info": info,
-                "asset": asset,
-                "tags": tag_names,
-                "created": False,
-            }
+            return result
 
         # New info - apply metadata and tags
         new_meta = dict(user_metadata or {})
@@ -195,14 +202,18 @@ def register_existing_asset(
             )
 
         tag_names = get_asset_tags(session, asset_info_id=info.id)
+        # Refresh to get updated metadata after set_asset_info_metadata
+        session.refresh(info)
+        # Extract plain data before session closes
+        result = RegisterAssetResult(
+            info=extract_info_data(info),
+            asset=extract_asset_data(asset),
+            tags=tag_names,
+            created=True,
+        )
         session.commit()
 
-        return {
-            "info": info,
-            "asset": asset,
-            "tags": tag_names,
-            "created": True,
-        }
+        return result
 
 
 def _validate_tags_exist(session, tags: list[str]) -> None:

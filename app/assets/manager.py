@@ -21,6 +21,7 @@ from app.assets.api import schemas_out, schemas_in
 from app.assets.api.schemas_in import (
     AssetNotFoundError,
     AssetValidationError,
+    DependencyMissingError,
     HashMismatchError,
     ParsedUpload,
 )
@@ -139,9 +140,8 @@ def get_asset(
     if not result:
         raise ValueError(f"AssetInfo {asset_info_id} not found")
 
-    info = result["info"]
-    asset = result["asset"]
-    tag_names = result["tags"]
+    info = result.info
+    asset = result.asset
 
     return schemas_out.AssetDetail(
         id=info.id,
@@ -149,7 +149,7 @@ def get_asset(
         asset_hash=asset.hash if asset else None,
         size=int(asset.size_bytes) if asset and asset.size_bytes is not None else None,
         mime_type=asset.mime_type if asset else None,
-        tags=tag_names,
+        tags=result.tags,
         user_metadata=info.user_metadata or {},
         preview_id=info.preview_id,
         created_at=info.created_at,
@@ -189,6 +189,8 @@ def upload_asset_from_temp_path(
 ) -> schemas_out.AssetCreated:
     try:
         digest = hashing.compute_blake3_hash(temp_path)
+    except ImportError as e:
+        raise DependencyMissingError(str(e))
     except Exception as e:
         raise RuntimeError(f"failed to hash uploaded file: {e}")
     asset_hash = "blake3:" + digest
@@ -214,9 +216,8 @@ def upload_asset_from_temp_path(
             tag_origin="manual",
             owner_id=owner_id,
         )
-        info = result["info"]
-        asset = result["asset"]
-        tag_names = result["tags"]
+        info = result.info
+        asset = result.asset
 
         return schemas_out.AssetCreated(
             id=info.id,
@@ -224,7 +225,7 @@ def upload_asset_from_temp_path(
             asset_hash=asset.hash,
             size=int(asset.size_bytes) if asset.size_bytes is not None else None,
             mime_type=asset.mime_type,
-            tags=tag_names,
+            tags=result.tags,
             user_metadata=info.user_metadata or {},
             preview_id=info.preview_id,
             created_at=info.created_at,
@@ -390,15 +391,14 @@ def update_asset(
         tag_origin="manual",
         owner_id=owner_id,
     )
-    info = result["info"]
-    asset = result["asset"]
-    tag_names = result["tags"]
+    info = result.info
+    asset = result.asset
 
     return schemas_out.AssetUpdated(
         id=info.id,
         name=info.name,
         asset_hash=asset.hash if asset else None,
-        tags=tag_names,
+        tags=result.tags,
         user_metadata=info.user_metadata or {},
         updated_at=info.updated_at,
     )
@@ -414,9 +414,8 @@ def set_asset_preview(
         preview_asset_id=preview_asset_id,
         owner_id=owner_id,
     )
-    info = result["info"]
-    asset = result["asset"]
-    tags = result["tags"]
+    info = result.info
+    asset = result.asset
 
     return schemas_out.AssetDetail(
         id=info.id,
@@ -424,7 +423,7 @@ def set_asset_preview(
         asset_hash=asset.hash if asset else None,
         size=int(asset.size_bytes) if asset and asset.size_bytes is not None else None,
         mime_type=asset.mime_type if asset else None,
-        tags=tags,
+        tags=result.tags,
         user_metadata=info.user_metadata or {},
         preview_id=info.preview_id,
         created_at=info.created_at,
@@ -462,22 +461,23 @@ def create_asset_from_hash(
         tag_origin="manual",
         owner_id=owner_id,
     )
-    info = result["info"]
-    asset = result["asset"]
-    tag_names = result["tags"]
+    info = result.info
+    asset = result.asset
 
+    # created_new indicates whether new CONTENT was created, not whether a new AssetInfo was created.
+    # Since we're referencing an existing hash, the content already exists.
     return schemas_out.AssetCreated(
         id=info.id,
         name=info.name,
         asset_hash=asset.hash,
         size=int(asset.size_bytes),
         mime_type=asset.mime_type,
-        tags=tag_names,
+        tags=result.tags,
         user_metadata=info.user_metadata or {},
         preview_id=info.preview_id,
         created_at=info.created_at,
         last_access_time=info.last_access_time,
-        created_new=result["created"],
+        created_new=False,
     )
 
 

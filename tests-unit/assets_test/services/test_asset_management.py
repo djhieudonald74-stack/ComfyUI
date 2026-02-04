@@ -55,9 +55,9 @@ class TestGetAssetDetail:
         result = get_asset_detail(asset_info_id=info.id)
 
         assert result is not None
-        assert result["info"].id == info.id
-        assert result["asset"].id == asset.id
-        assert set(result["tags"]) == {"alpha", "beta"}
+        assert result.info.id == info.id
+        assert result.asset.hash == asset.hash
+        assert set(result.tags) == {"alpha", "beta"}
 
     def test_respects_owner_visibility(self, mock_create_session, session: Session):
         asset = _make_asset(session)
@@ -102,8 +102,8 @@ class TestUpdateAssetMetadata:
             tags=["new1", "new2"],
         )
 
-        assert set(result["tags"]) == {"new1", "new2"}
-        assert "old" not in result["tags"]
+        assert set(result.tags) == {"new1", "new2"}
+        assert "old" not in result.tags
 
     def test_updates_user_metadata(self, mock_create_session, session: Session):
         asset = _make_asset(session)

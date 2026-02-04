@@ -12,6 +12,7 @@ from app.assets.api import schemas_in
 from app.assets.api.schemas_in import (
     AssetNotFoundError,
     AssetValidationError,
+    DependencyMissingError,
     HashMismatchError,
     UploadError,
 )
@@ -205,6 +206,8 @@ async def upload_asset(request: web.Request) -> web.Response:
         return _build_error_response(404, "ASSET_NOT_FOUND", str(e))
     except HashMismatchError as e:
         return _build_error_response(400, "HASH_MISMATCH", str(e))
+    except DependencyMissingError as e:
+        return _build_error_response(503, "DEPENDENCY_MISSING", e.message)
     except Exception:
         logging.exception("process_upload failed for owner_id=%s", owner_id)
         return _build_error_response(500, "INTERNAL", "Unexpected server error.")

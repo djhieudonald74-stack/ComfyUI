@@ -43,6 +43,14 @@ class HashMismatchError(Exception):
     pass
 
 
+class DependencyMissingError(Exception):
+    """A required dependency is not installed."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 @dataclass
 class ParsedUpload:
     """Result of parsing a multipart upload request."""
