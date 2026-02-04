@@ -76,6 +76,34 @@ class TagUsage(NamedTuple):
     count: int
 
 
+@dataclass(frozen=True)
+class AssetSummaryData:
+    info: AssetInfoData
+    asset: AssetData | None
+    tags: list[str]
+
+
+@dataclass(frozen=True)
+class ListAssetsResult:
+    items: list[AssetSummaryData]
+    total: int
+
+
+@dataclass(frozen=True)
+class DownloadResolutionResult:
+    abs_path: str
+    content_type: str
+    download_name: str
+
+
+@dataclass(frozen=True)
+class UploadResult:
+    info: AssetInfoData
+    asset: AssetData
+    tags: list[str]
+    created_new: bool
+
+
 def extract_info_data(info: AssetInfo) -> AssetInfoData:
     return AssetInfoData(
         id=info.id,
