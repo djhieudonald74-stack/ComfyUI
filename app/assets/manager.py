@@ -28,23 +28,19 @@ from app.assets.database.queries import (
 from app.assets.helpers import select_best_live_path
 from app.assets.services import (
     apply_tags,
+    delete_asset_reference as svc_delete_asset_reference,
     get_asset_detail,
     ingest_file_from_path,
+    list_tags as svc_list_tags,
     register_existing_asset,
     remove_tags,
-    update_asset_metadata,
-)
-from app.assets.services import (
-    delete_asset_reference as svc_delete_asset_reference,
-)
-from app.assets.services import (
     set_asset_preview as svc_set_asset_preview,
+    update_asset_metadata,
 )
 from app.assets.services.path_utils import (
     resolve_destination_from_tags,
     validate_path_within_base,
 )
-from app.assets.services.tagging import list_tags as svc_list_tags
 from app.database.db import create_session
 
 
