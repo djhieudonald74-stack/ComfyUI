@@ -7,7 +7,7 @@ import folder_paths
 import time
 from comfy.cli_args import args, enables_dynamic_vram
 from app.logger import setup_logger
-from app.assets.scanner import seed_assets
+from app.assets.seeder import asset_seeder
 import itertools
 import utils.extra_config
 import logging
@@ -357,7 +357,8 @@ def setup_database():
         if dependencies_available():
             init_db()
             if not args.disable_assets_autoscan:
-                seed_assets(["models"], enable_logging=True)
+                if asset_seeder.start(roots=("models",)):
+                    logging.info("Background asset scan initiated for models")
     except Exception as e:
         logging.error(f"Failed to initialize database. Please ensure you have installed the latest requirements. If the error persists, please report this as in future the database will be required: {e}")
 
@@ -441,5 +442,6 @@ if __name__ == "__main__":
         event_loop.run_until_complete(x)
     except KeyboardInterrupt:
         logging.info("\nStopped server")
-
-    cleanup_temp()
+    finally:
+        asset_seeder.shutdown()
+        cleanup_temp()
