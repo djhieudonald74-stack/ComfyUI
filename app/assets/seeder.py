@@ -197,18 +197,23 @@ class AssetSeeder:
                     "Cannot mark missing assets while scan is running"
                 )
                 return 0
+            self._state = State.RUNNING
 
-        if not dependencies_available():
-            logging.warning(
-                "Database dependencies not available, skipping mark missing"
-            )
-            return 0
+        try:
+            if not dependencies_available():
+                logging.warning(
+                    "Database dependencies not available, skipping mark missing"
+                )
+                return 0
 
-        all_prefixes = get_all_known_prefixes()
-        marked = mark_missing_outside_prefixes_safely(all_prefixes)
-        if marked > 0:
-            logging.info("Marked %d cache states as missing", marked)
-        return marked
+            all_prefixes = get_all_known_prefixes()
+            marked = mark_missing_outside_prefixes_safely(all_prefixes)
+            if marked > 0:
+                logging.info("Marked %d cache states as missing", marked)
+            return marked
+        finally:
+            with self._lock:
+                self._state = State.IDLE
 
     def _is_cancelled(self) -> bool:
         """Check if cancellation has been requested."""
@@ -362,9 +367,9 @@ class AssetSeeder:
                     logging.exception("Batch insert failed at offset %d", i)
 
                 scanned = i + len(batch)
+                now = time.perf_counter()
                 self._update_progress(scanned=scanned, created=total_created)
 
-                now = time.perf_counter()
                 if now - last_progress_time >= progress_interval:
                     self._emit_event(
                         "assets.seed.progress",
