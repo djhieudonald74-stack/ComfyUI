@@ -49,11 +49,15 @@ def upsert_cache_state(
     file_path: str,
     mtime_ns: int,
 ) -> tuple[bool, bool]:
-    """Upsert a cache state by file_path. Returns (created, updated)."""
+    """Upsert a cache state by file_path. Returns (created, updated).
+
+    Also restores cache states that were previously marked as missing.
+    """
     vals = {
         "asset_id": asset_id,
         "file_path": file_path,
         "mtime_ns": int(mtime_ns),
+        "is_missing": False,
     }
     ins = (
         sqlite.insert(AssetCacheState)
@@ -74,26 +78,30 @@ def upsert_cache_state(
                 AssetCacheState.asset_id != asset_id,
                 AssetCacheState.mtime_ns.is_(None),
                 AssetCacheState.mtime_ns != int(mtime_ns),
+                AssetCacheState.is_missing == True,  # noqa: E712
             )
         )
-        .values(asset_id=asset_id, mtime_ns=int(mtime_ns))
+        .values(asset_id=asset_id, mtime_ns=int(mtime_ns), is_missing=False)
     )
     res2 = session.execute(upd)
     updated = int(res2.rowcount or 0) > 0
     return False, updated
 
 
-def delete_cache_states_outside_prefixes(
+def mark_cache_states_missing_outside_prefixes(
     session: Session, valid_prefixes: list[str]
 ) -> int:
-    """Delete cache states with file_path not matching any of the valid prefixes.
+    """Mark cache states as missing when file_path doesn't match any valid prefix.
+
+    This is a non-destructive soft-delete that preserves user metadata.
+    Cache states can be restored if the file reappears in a future scan.
 
     Args:
         session: Database session
         valid_prefixes: List of absolute directory prefixes that are valid
 
     Returns:
-        Number of cache states deleted
+        Number of cache states marked as missing
     """
     if not valid_prefixes:
         return 0
@@ -104,22 +112,59 @@ def delete_cache_states_outside_prefixes(
         return AssetCacheState.file_path.like(escaped + "%", escape=esc)
 
     matches_valid_prefix = sa.or_(*[make_prefix_condition(p) for p in valid_prefixes])
-    result = session.execute(sa.delete(AssetCacheState).where(~matches_valid_prefix))
+    result = session.execute(
+        sa.update(AssetCacheState)
+        .where(~matches_valid_prefix)
+        .where(AssetCacheState.is_missing == False)  # noqa: E712
+        .values(is_missing=True)
+    )
     return result.rowcount
 
 
-def get_orphaned_seed_asset_ids(session: Session) -> list[str]:
-    """Get IDs of seed assets (hash is None) with no remaining cache states.
+def restore_cache_states_by_paths(session: Session, file_paths: list[str]) -> int:
+    """Restore cache states that were previously marked as missing.
+
+    Called when a file path is re-scanned and found to exist.
+
+    Args:
+        session: Database session
+        file_paths: List of file paths that exist and should be restored
 
     Returns:
-        List of asset IDs that are orphaned
+        Number of cache states restored
     """
-    orphan_subq = (
-        sa.select(Asset.id)
-        .outerjoin(AssetCacheState, AssetCacheState.asset_id == Asset.id)
-        .where(Asset.hash.is_(None), AssetCacheState.id.is_(None))
+    if not file_paths:
+        return 0
+
+    result = session.execute(
+        sa.update(AssetCacheState)
+        .where(AssetCacheState.file_path.in_(file_paths))
+        .where(AssetCacheState.is_missing == True)  # noqa: E712
+        .values(is_missing=False)
     )
-    return [row[0] for row in session.execute(orphan_subq).all()]
+    return result.rowcount
+
+
+def get_unreferenced_unhashed_asset_ids(session: Session) -> list[str]:
+    """Get IDs of unhashed assets (hash=None) with no active cache states.
+
+    An asset is considered unreferenced if it has no cache states,
+    or all its cache states are marked as missing.
+
+    Returns:
+        List of asset IDs that are unreferenced
+    """
+    active_cache_state_exists = (
+        sa.select(sa.literal(1))
+        .where(AssetCacheState.asset_id == Asset.id)
+        .where(AssetCacheState.is_missing == False)  # noqa: E712
+        .correlate(Asset)
+        .exists()
+    )
+    unreferenced_subq = sa.select(Asset.id).where(
+        Asset.hash.is_(None), ~active_cache_state_exists
+    )
+    return [row[0] for row in session.execute(unreferenced_subq).all()]
 
 
 def delete_assets_by_ids(session: Session, asset_ids: list[str]) -> int:
@@ -142,12 +187,15 @@ def delete_assets_by_ids(session: Session, asset_ids: list[str]) -> int:
 def get_cache_states_for_prefixes(
     session: Session,
     prefixes: list[str],
+    *,
+    include_missing: bool = False,
 ) -> list[CacheStateRow]:
     """Get all cache states with paths matching any of the given prefixes.
 
     Args:
         session: Database session
         prefixes: List of absolute directory prefixes to match
+        include_missing: If False (default), exclude cache states marked as missing
 
     Returns:
         List of cache state rows with joined asset data, ordered by asset_id, state_id
@@ -163,7 +211,7 @@ def get_cache_states_for_prefixes(
         escaped, esc = escape_sql_like_string(base)
         conds.append(AssetCacheState.file_path.like(escaped + "%", escape=esc))
 
-    rows = session.execute(
+    query = (
         sa.select(
             AssetCacheState.id,
             AssetCacheState.file_path,
@@ -175,7 +223,13 @@ def get_cache_states_for_prefixes(
         )
         .join(Asset, Asset.id == AssetCacheState.asset_id)
         .where(sa.or_(*conds))
-        .order_by(AssetCacheState.asset_id.asc(), AssetCacheState.id.asc())
+    )
+
+    if not include_missing:
+        query = query.where(AssetCacheState.is_missing == False)  # noqa: E712
+
+    rows = session.execute(
+        query.order_by(AssetCacheState.asset_id.asc(), AssetCacheState.id.asc())
     ).all()
 
     return [
@@ -240,13 +294,15 @@ def bulk_insert_cache_states_ignore_conflicts(
     """Bulk insert cache state rows with ON CONFLICT DO NOTHING on file_path.
 
     Each dict should have: asset_id, file_path, mtime_ns
+    The is_missing field is automatically set to False for new inserts.
     """
     if not rows:
         return
+    enriched_rows = [{**row, "is_missing": False} for row in rows]
     ins = sqlite.insert(AssetCacheState).on_conflict_do_nothing(
         index_elements=[AssetCacheState.file_path]
     )
-    for chunk in iter_chunks(rows, calculate_rows_per_statement(3)):
+    for chunk in iter_chunks(enriched_rows, calculate_rows_per_statement(4)):
         session.execute(ins, chunk)
 
 

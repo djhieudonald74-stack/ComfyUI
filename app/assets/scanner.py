@@ -17,7 +17,7 @@ from app.assets.database.queries import (
 from app.assets.services.bulk_ingest import (
     SeedAssetSpec,
     batch_insert_seed_assets,
-    prune_orphaned_assets,
+    mark_assets_missing_outside_prefixes,
 )
 from app.assets.services.file_utils import (
     get_mtime_ns,
@@ -221,18 +221,18 @@ def sync_root_safely(root: RootType) -> set[str]:
         return set()
 
 
-def prune_orphans_safely(prefixes: list[str]) -> int:
-    """Prune orphaned assets outside the given prefixes.
+def mark_missing_outside_prefixes_safely(prefixes: list[str]) -> int:
+    """Mark cache states as missing when outside the given prefixes.
 
-    Returns count pruned or 0 on failure.
+    This is a non-destructive soft-delete. Returns count marked or 0 on failure.
     """
     try:
         with create_session() as sess:
-            count = prune_orphaned_assets(sess, prefixes)
+            count = mark_assets_missing_outside_prefixes(sess, prefixes)
             sess.commit()
             return count
     except Exception as e:
-        logging.exception("orphan pruning failed: %s", e)
+        logging.exception("marking missing assets failed: %s", e)
         return 0
 
 
@@ -319,7 +319,7 @@ def insert_asset_specs(specs: list[SeedAssetSpec], tag_pool: set[str]) -> int:
 def seed_assets(roots: tuple[RootType, ...], enable_logging: bool = False) -> None:
     """Scan the given roots and seed the assets into the database.
 
-    Note: This function does not prune orphaned assets. Call prune_orphaned_assets
+    Note: This function does not mark missing assets. Call mark_missing_outside_prefixes_safely
     separately if cleanup is needed.
     """
     if not dependencies_available():

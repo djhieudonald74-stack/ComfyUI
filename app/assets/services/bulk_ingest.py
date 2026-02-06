@@ -28,10 +28,10 @@ from app.assets.database.queries import (
     bulk_insert_cache_states_ignore_conflicts,
     bulk_insert_tags_and_meta,
     delete_assets_by_ids,
-    delete_cache_states_outside_prefixes,
     get_asset_info_ids_by_ids,
     get_cache_states_by_paths_and_asset_ids,
-    get_orphaned_seed_asset_ids,
+    get_unreferenced_unhashed_asset_ids,
+    mark_cache_states_missing_outside_prefixes,
 )
 from app.assets.helpers import get_utc_now
 
@@ -210,16 +210,37 @@ def batch_insert_seed_assets(
     )
 
 
-def prune_orphaned_assets(session: Session, valid_prefixes: list[str]) -> int:
-    """Prune cache states outside valid prefixes, then delete orphaned seed assets.
+def mark_assets_missing_outside_prefixes(
+    session: Session, valid_prefixes: list[str]
+) -> int:
+    """Mark cache states as missing when outside valid prefixes.
+
+    This is a non-destructive operation that soft-deletes cache states
+    by setting is_missing=True. User metadata is preserved and assets
+    can be restored if the file reappears in a future scan.
+
+    Note: This does NOT delete
+    unreferenced unhashed assets. Those are preserved so user metadata
+    remains intact even when base directories change.
 
     Args:
         session: Database session
         valid_prefixes: List of absolute directory prefixes that are valid
 
     Returns:
-        Number of orphaned assets deleted
+        Number of cache states marked as missing
     """
-    delete_cache_states_outside_prefixes(session, valid_prefixes)
-    orphan_ids = get_orphaned_seed_asset_ids(session)
-    return delete_assets_by_ids(session, orphan_ids)
+    return mark_cache_states_missing_outside_prefixes(session, valid_prefixes)
+
+
+def cleanup_unreferenced_assets(session: Session) -> int:
+    """Hard-delete unhashed assets with no active cache states.
+
+    This is a destructive operation intended for explicit cleanup.
+    Only deletes assets where hash=None and all cache states are missing.
+
+    Returns:
+        Number of assets deleted
+    """
+    unreferenced_ids = get_unreferenced_unhashed_asset_ids(session)
+    return delete_assets_by_ids(session, unreferenced_ids)

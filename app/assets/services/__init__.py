@@ -11,7 +11,8 @@ from app.assets.services.asset_management import (
 from app.assets.services.bulk_ingest import (
     BulkInsertResult,
     batch_insert_seed_assets,
-    prune_orphaned_assets,
+    cleanup_unreferenced_assets,
+    mark_assets_missing_outside_prefixes,
 )
 from app.assets.services.file_utils import (
     get_mtime_ns,
@@ -77,7 +78,8 @@ __all__ = [
     "list_assets_page",
     "list_files_recursively",
     "list_tags",
-    "prune_orphaned_assets",
+    "cleanup_unreferenced_assets",
+    "mark_assets_missing_outside_prefixes",
     "remove_tags",
     "resolve_asset_for_download",
     "set_asset_preview",

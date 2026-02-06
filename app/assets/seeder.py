@@ -15,7 +15,7 @@ from app.assets.scanner import (
     get_all_known_prefixes,
     get_prefixes_for_root,
     insert_asset_specs,
-    prune_orphans_safely,
+    mark_missing_outside_prefixes_safely,
     sync_root_safely,
 )
 from app.database.db import dependencies_available
@@ -174,35 +174,41 @@ class AssetSeeder:
         with self._lock:
             self._thread = None
 
-    def prune_orphans(self) -> int:
-        """Prune orphaned assets that are outside all known root prefixes.
+    def mark_missing_outside_prefixes(self) -> int:
+        """Mark cache states as missing when outside all known root prefixes.
+
+        This is a non-destructive soft-delete operation. Assets and their
+        metadata are preserved, but cache states are flagged as missing.
+        They can be restored if the file reappears in a future scan.
 
         This operation is decoupled from scanning to prevent partial scans
-        from accidentally deleting assets belonging to other roots.
+        from accidentally marking assets belonging to other roots.
 
         Should be called explicitly when cleanup is desired, typically after
         a full scan of all roots or during maintenance.
 
         Returns:
-            Number of orphaned assets pruned, or 0 if dependencies unavailable
-            or a scan is currently running
+            Number of cache states marked as missing, or 0 if dependencies
+            unavailable or a scan is currently running
         """
         with self._lock:
             if self._state != State.IDLE:
-                logging.warning("Cannot prune orphans while scan is running")
+                logging.warning(
+                    "Cannot mark missing assets while scan is running"
+                )
                 return 0
 
         if not dependencies_available():
             logging.warning(
-                "Database dependencies not available, skipping orphan pruning"
+                "Database dependencies not available, skipping mark missing"
             )
             return 0
 
         all_prefixes = get_all_known_prefixes()
-        pruned = prune_orphans_safely(all_prefixes)
-        if pruned > 0:
-            logging.info("Pruned %d orphaned assets", pruned)
-        return pruned
+        marked = mark_missing_outside_prefixes_safely(all_prefixes)
+        if marked > 0:
+            logging.info("Marked %d cache states as missing", marked)
+        return marked
 
     def _is_cancelled(self) -> bool:
         """Check if cancellation has been requested."""
@@ -290,9 +296,9 @@ class AssetSeeder:
 
             if self._prune_first:
                 all_prefixes = get_all_known_prefixes()
-                pruned = prune_orphans_safely(all_prefixes)
-                if pruned > 0:
-                    logging.info("Pruned %d orphaned assets before scan", pruned)
+                marked = mark_missing_outside_prefixes_safely(all_prefixes)
+                if marked > 0:
+                    logging.info("Marked %d cache states as missing before scan", marked)
 
             if self._is_cancelled():
                 logging.info("Asset scan cancelled after pruning phase")

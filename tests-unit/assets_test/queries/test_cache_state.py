@@ -6,8 +6,7 @@ from app.assets.database.models import Asset, AssetCacheState, AssetInfo
 from app.assets.database.queries import (
     list_cache_states_by_asset_id,
     upsert_cache_state,
-    delete_cache_states_outside_prefixes,
-    get_orphaned_seed_asset_ids,
+    get_unreferenced_unhashed_asset_ids,
     delete_assets_by_ids,
     get_cache_states_for_prefixes,
     bulk_set_needs_verify,
@@ -15,6 +14,8 @@ from app.assets.database.queries import (
     delete_orphaned_seed_asset,
     bulk_insert_cache_states_ignore_conflicts,
     get_cache_states_by_paths_and_asset_ids,
+    mark_cache_states_missing_outside_prefixes,
+    restore_cache_states_by_paths,
 )
 from app.assets.helpers import select_best_live_path, get_utc_now
 
@@ -168,9 +169,51 @@ class TestUpsertCacheState:
         state = session.query(AssetCacheState).filter_by(file_path=file_path).one()
         assert state.mtime_ns == final_mtime
 
+    def test_upsert_restores_missing_state(self, session: Session):
+        """Upserting a cache state that was marked missing should restore it."""
+        asset = _make_asset(session, "hash1")
+        file_path = "/restored/file.bin"
 
-class TestDeleteCacheStatesOutsidePrefixes:
-    def test_deletes_states_outside_prefixes(self, session: Session, tmp_path):
+        state = _make_cache_state(session, asset, file_path, mtime_ns=100)
+        state.is_missing = True
+        session.commit()
+
+        created, updated = upsert_cache_state(
+            session, asset_id=asset.id, file_path=file_path, mtime_ns=100
+        )
+        session.commit()
+
+        assert created is False
+        assert updated is True
+        restored_state = session.query(AssetCacheState).filter_by(file_path=file_path).one()
+        assert restored_state.is_missing is False
+
+
+class TestRestoreCacheStatesByPaths:
+    def test_restores_missing_states(self, session: Session):
+        asset = _make_asset(session, "hash1")
+        missing_path = "/missing/file.bin"
+        active_path = "/active/file.bin"
+
+        missing_state = _make_cache_state(session, asset, missing_path)
+        missing_state.is_missing = True
+        _make_cache_state(session, asset, active_path)
+        session.commit()
+
+        restored = restore_cache_states_by_paths(session, [missing_path])
+        session.commit()
+
+        assert restored == 1
+        state = session.query(AssetCacheState).filter_by(file_path=missing_path).one()
+        assert state.is_missing is False
+
+    def test_empty_list_restores_nothing(self, session: Session):
+        restored = restore_cache_states_by_paths(session, [])
+        assert restored == 0
+
+
+class TestMarkCacheStatesMissingOutsidePrefixes:
+    def test_marks_states_missing_outside_prefixes(self, session: Session, tmp_path):
         asset = _make_asset(session, "hash1")
         valid_dir = tmp_path / "valid"
         valid_dir.mkdir()
@@ -184,39 +227,48 @@ class TestDeleteCacheStatesOutsidePrefixes:
         _make_cache_state(session, asset, invalid_path)
         session.commit()
 
-        deleted = delete_cache_states_outside_prefixes(session, [str(valid_dir)])
+        marked = mark_cache_states_missing_outside_prefixes(session, [str(valid_dir)])
         session.commit()
 
-        assert deleted == 1
-        remaining = session.query(AssetCacheState).all()
-        assert len(remaining) == 1
-        assert remaining[0].file_path == valid_path
+        assert marked == 1
+        all_states = session.query(AssetCacheState).all()
+        assert len(all_states) == 2
 
-    def test_empty_prefixes_deletes_nothing(self, session: Session):
+        valid_state = next(s for s in all_states if s.file_path == valid_path)
+        invalid_state = next(s for s in all_states if s.file_path == invalid_path)
+        assert valid_state.is_missing is False
+        assert invalid_state.is_missing is True
+
+    def test_empty_prefixes_marks_nothing(self, session: Session):
         asset = _make_asset(session, "hash1")
         _make_cache_state(session, asset, "/some/path.bin")
         session.commit()
 
-        deleted = delete_cache_states_outside_prefixes(session, [])
+        marked = mark_cache_states_missing_outside_prefixes(session, [])
 
-        assert deleted == 0
+        assert marked == 0
 
 
-class TestGetOrphanedSeedAssetIds:
-    def test_returns_orphaned_seed_assets(self, session: Session):
-        # Seed asset (hash=None) with no cache states
-        orphan = _make_asset(session, hash_val=None)
-        # Seed asset with cache state (not orphaned)
-        with_state = _make_asset(session, hash_val=None)
-        _make_cache_state(session, with_state, "/has/state.bin")
+class TestGetUnreferencedUnhashedAssetIds:
+    def test_returns_unreferenced_unhashed_assets(self, session: Session):
+        # Unhashed asset (hash=None) with no cache states
+        no_states = _make_asset(session, hash_val=None)
+        # Unhashed asset with active cache state (not unreferenced)
+        with_active_state = _make_asset(session, hash_val=None)
+        _make_cache_state(session, with_active_state, "/has/state.bin")
+        # Unhashed asset with only missing cache state (should be unreferenced)
+        with_missing_state = _make_asset(session, hash_val=None)
+        missing_state = _make_cache_state(session, with_missing_state, "/missing/state.bin")
+        missing_state.is_missing = True
         # Regular asset (hash not None) - should not be returned
         _make_asset(session, hash_val="blake3:regular")
         session.commit()
 
-        orphaned = get_orphaned_seed_asset_ids(session)
+        unreferenced = get_unreferenced_unhashed_asset_ids(session)
 
-        assert orphan.id in orphaned
-        assert with_state.id not in orphaned
+        assert no_states.id in unreferenced
+        assert with_missing_state.id in unreferenced
+        assert with_active_state.id not in unreferenced
 
 
 class TestDeleteAssetsByIds:

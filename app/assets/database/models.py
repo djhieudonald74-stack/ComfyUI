@@ -83,12 +83,14 @@ class AssetCacheState(Base):
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     needs_verify: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_missing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     asset: Mapped[Asset] = relationship(back_populates="cache_states")
 
     __table_args__ = (
         Index("ix_asset_cache_state_file_path", "file_path"),
         Index("ix_asset_cache_state_asset_id", "asset_id"),
+        Index("ix_asset_cache_state_is_missing", "is_missing"),
         CheckConstraint(
             "(mtime_ns IS NULL) OR (mtime_ns >= 0)", name="ck_acs_mtime_nonneg"
         ),

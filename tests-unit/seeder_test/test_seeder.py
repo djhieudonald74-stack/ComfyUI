@@ -349,10 +349,10 @@ class TestSeederThreadSafety:
             )
 
 
-class TestSeederPruneOrphans:
-    """Test prune_orphans behavior."""
+class TestSeederMarkMissing:
+    """Test mark_missing_outside_prefixes behavior."""
 
-    def test_prune_orphans_when_idle(self, fresh_seeder: AssetSeeder):
+    def test_mark_missing_when_idle(self, fresh_seeder: AssetSeeder):
         with (
             patch("app.assets.seeder.dependencies_available", return_value=True),
             patch(
@@ -360,14 +360,14 @@ class TestSeederPruneOrphans:
                 return_value=["/models", "/input", "/output"],
             ),
             patch(
-                "app.assets.seeder.prune_orphans_safely", return_value=5
-            ) as mock_prune,
+                "app.assets.seeder.mark_missing_outside_prefixes_safely", return_value=5
+            ) as mock_mark,
         ):
-            result = fresh_seeder.prune_orphans()
+            result = fresh_seeder.mark_missing_outside_prefixes()
             assert result == 5
-            mock_prune.assert_called_once_with(["/models", "/input", "/output"])
+            mock_mark.assert_called_once_with(["/models", "/input", "/output"])
 
-    def test_prune_orphans_returns_zero_when_running(
+    def test_mark_missing_returns_zero_when_running(
         self, fresh_seeder: AssetSeeder, mock_dependencies
     ):
         barrier = threading.Event()
@@ -382,35 +382,35 @@ class TestSeederPruneOrphans:
             fresh_seeder.start(roots=("models",))
             time.sleep(0.05)
 
-            result = fresh_seeder.prune_orphans()
+            result = fresh_seeder.mark_missing_outside_prefixes()
             assert result == 0
 
             barrier.set()
 
-    def test_prune_orphans_returns_zero_when_dependencies_unavailable(
+    def test_mark_missing_returns_zero_when_dependencies_unavailable(
         self, fresh_seeder: AssetSeeder
     ):
         with patch("app.assets.seeder.dependencies_available", return_value=False):
-            result = fresh_seeder.prune_orphans()
+            result = fresh_seeder.mark_missing_outside_prefixes()
             assert result == 0
 
-    def test_prune_first_flag_triggers_pruning_before_scan(
+    def test_prune_first_flag_triggers_mark_missing_before_scan(
         self, fresh_seeder: AssetSeeder
     ):
-        prune_call_order = []
+        call_order = []
 
-        def track_prune(prefixes):
-            prune_call_order.append("prune")
+        def track_mark(prefixes):
+            call_order.append("mark_missing")
             return 3
 
         def track_sync(root):
-            prune_call_order.append(f"sync_{root}")
+            call_order.append(f"sync_{root}")
             return set()
 
         with (
             patch("app.assets.seeder.dependencies_available", return_value=True),
             patch("app.assets.seeder.get_all_known_prefixes", return_value=["/models"]),
-            patch("app.assets.seeder.prune_orphans_safely", side_effect=track_prune),
+            patch("app.assets.seeder.mark_missing_outside_prefixes_safely", side_effect=track_mark),
             patch("app.assets.seeder.sync_root_safely", side_effect=track_sync),
             patch("app.assets.seeder.collect_paths_for_roots", return_value=[]),
             patch("app.assets.seeder.build_asset_specs", return_value=([], set(), 0)),
@@ -419,5 +419,5 @@ class TestSeederPruneOrphans:
             fresh_seeder.start(roots=("models",), prune_first=True)
             fresh_seeder.wait(timeout=5.0)
 
-            assert prune_call_order[0] == "prune"
-            assert "sync_models" in prune_call_order
+            assert call_order[0] == "mark_missing"
+            assert "sync_models" in call_order

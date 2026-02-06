@@ -698,20 +698,21 @@ async def cancel_seed(request: web.Request) -> web.Response:
 
 
 @ROUTES.post("/api/assets/prune")
-async def prune_orphans(request: web.Request) -> web.Response:
-    """Prune orphaned assets that no longer exist on the filesystem.
+async def mark_missing_assets(request: web.Request) -> web.Response:
+    """Mark assets as missing when their cache states point to files outside all known root prefixes.
 
-    This removes assets whose cache states point to files outside all known
-    root prefixes (models, input, output).
+    This is a non-destructive soft-delete operation. Assets and their metadata
+    are preserved, but cache states are flagged as missing. They can be restored
+    if the file reappears in a future scan.
 
     Returns:
-        200 OK with count of pruned assets
+        200 OK with count of marked assets
         409 Conflict if a scan is currently running
     """
-    pruned = asset_seeder.prune_orphans()
-    if pruned == 0 and asset_seeder.get_status().state.value != "IDLE":
+    marked = asset_seeder.mark_missing_outside_prefixes()
+    if marked == 0 and asset_seeder.get_status().state.value != "IDLE":
         return web.json_response(
-            {"status": "scan_running", "pruned": 0},
+            {"status": "scan_running", "marked": 0},
             status=409,
         )
-    return web.json_response({"status": "completed", "pruned": pruned}, status=200)
+    return web.json_response({"status": "completed", "marked": marked}, status=200)
