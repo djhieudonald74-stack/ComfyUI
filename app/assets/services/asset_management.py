@@ -272,7 +272,9 @@ def resolve_asset_for_download(
         states = list_cache_states_by_asset_id(session, asset_id=asset.id)
         abs_path = select_best_live_path(states)
         if not abs_path:
-            raise FileNotFoundError
+            raise FileNotFoundError(
+                f"No live path for AssetInfo {asset_info_id} (asset id={asset.id}, name={info.name})"
+            )
 
         update_asset_info_access_time(session, asset_info_id=asset_info_id)
         session.commit()

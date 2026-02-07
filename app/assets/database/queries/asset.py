@@ -85,6 +85,6 @@ def bulk_insert_assets(
     """Bulk insert Asset rows. Each dict should have: id, hash, size_bytes, mime_type, created_at."""
     if not rows:
         return
-    ins = sqlite.insert(Asset)
+    ins = sqlite.insert(Asset).on_conflict_do_nothing(index_elements=[Asset.hash])
     for chunk in iter_chunks(rows, calculate_rows_per_statement(5)):
         session.execute(ins, chunk)

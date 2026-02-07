@@ -36,6 +36,7 @@ class SeedAssetSpec(TypedDict):
     tags: list[str]
     fname: str
     metadata: ExtractedMetadata | None
+    hash: str | None
 
 
 class AssetRow(TypedDict):
@@ -163,7 +164,7 @@ def batch_insert_seed_assets(
         asset_rows.append(
             {
                 "id": asset_id,
-                "hash": None,
+                "hash": spec.get("hash"),
                 "size_bytes": spec["size_bytes"],
                 "mime_type": None,
                 "created_at": current_time,

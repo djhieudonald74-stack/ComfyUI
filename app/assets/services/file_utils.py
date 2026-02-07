@@ -23,15 +23,16 @@ def verify_file_unchanged(
 
     Returns True if the file's mtime and size match the database values.
     Returns False if mtime_db is None or values don't match.
+
+    size_db=None means don't check size; 0 is a valid recorded size.
     """
     if mtime_db is None:
         return False
     actual_mtime_ns = get_mtime_ns(stat_result)
     if int(mtime_db) != int(actual_mtime_ns):
         return False
-    sz = int(size_db or 0)
-    if sz > 0:
-        return int(stat_result.st_size) == sz
+    if size_db is not None:
+        return int(stat_result.st_size) == int(size_db)
     return True
 
 

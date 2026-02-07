@@ -25,6 +25,7 @@ from app.assets.services.file_utils import (
     list_files_recursively,
     verify_file_unchanged,
 )
+from app.assets.services.hashing import compute_blake3_hash
 from app.assets.services.metadata_extract import extract_file_metadata
 from app.assets.services.path_utils import (
     compute_relative_filename,
@@ -84,7 +85,7 @@ def collect_models_files() -> list[str]:
             allowed = False
             for b in bases:
                 base_abs = os.path.abspath(b)
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(ValueError):
                     if os.path.commonpath([abs_path, base_abs]) == base_abs:
                         allowed = True
                         break
@@ -120,7 +121,9 @@ def sync_cache_states_with_filesystem(
     if not prefixes:
         return set() if collect_existing_paths else None
 
-    rows = get_cache_states_for_prefixes(session, prefixes)
+    rows = get_cache_states_for_prefixes(
+        session, prefixes, include_missing=update_missing_tags
+    )
 
     by_asset: dict[str, _AssetAccumulator] = {}
     for row in rows:
@@ -139,8 +142,12 @@ def sync_cache_states_with_filesystem(
             )
         except FileNotFoundError:
             exists = False
-        except OSError:
+        except PermissionError:
+            exists = True
+            logging.debug("Permission denied accessing %s", row.file_path)
+        except OSError as e:
             exists = False
+            logging.debug("OSError checking %s: %s", row.file_path, e)
 
         acc["states"].append(
             {
@@ -156,6 +163,7 @@ def sync_cache_states_with_filesystem(
     to_clear_verify: list[int] = []
     stale_state_ids: list[int] = []
     to_mark_missing: list[int] = []
+    to_clear_missing: list[int] = []
     survivors: set[str] = set()
 
     for aid, acc in by_asset.items():
@@ -168,8 +176,10 @@ def sync_cache_states_with_filesystem(
             if not s["exists"]:
                 to_mark_missing.append(s["sid"])
                 continue
-            if s["fast_ok"] and s["needs_verify"]:
-                to_clear_verify.append(s["sid"])
+            if s["fast_ok"]:
+                to_clear_missing.append(s["sid"])
+                if s["needs_verify"]:
+                    to_clear_verify.append(s["sid"])
             if not s["fast_ok"] and not s["needs_verify"]:
                 to_set_verify.append(s["sid"])
 
@@ -187,11 +197,15 @@ def sync_cache_states_with_filesystem(
                 if not s["exists"]:
                     stale_state_ids.append(s["sid"])
             if update_missing_tags:
-                with contextlib.suppress(Exception):
+                try:
                     remove_missing_tag_for_asset_id(session, asset_id=aid)
+                except Exception as e:
+                    logging.warning("Failed to remove missing tag for asset %s: %s", aid, e)
         elif update_missing_tags:
-            with contextlib.suppress(Exception):
+            try:
                 add_missing_tag_for_asset_id(session, asset_id=aid, origin="automatic")
+            except Exception as e:
+                logging.warning("Failed to add missing tag for asset %s: %s", aid, e)
 
         for s in states:
             if s["exists"]:
@@ -201,6 +215,7 @@ def sync_cache_states_with_filesystem(
     stale_set = set(stale_state_ids)
     to_mark_missing = [sid for sid in to_mark_missing if sid not in stale_set]
     bulk_update_is_missing(session, to_mark_missing, value=True)
+    bulk_update_is_missing(session, to_clear_missing, value=False)
     bulk_update_needs_verify(session, to_set_verify, value=True)
     bulk_update_needs_verify(session, to_clear_verify, value=False)
 
@@ -258,6 +273,7 @@ def build_asset_specs(
     paths: list[str],
     existing_paths: set[str],
     enable_metadata_extraction: bool = True,
+    compute_hashes: bool = False,
 ) -> tuple[list[SeedAssetSpec], set[str], int]:
     """Build asset specs from paths, returning (specs, tag_pool, skipped_count).
 
@@ -265,6 +281,7 @@ def build_asset_specs(
         paths: List of file paths to process
         existing_paths: Set of paths that already exist in the database
         enable_metadata_extraction: If True, extract tier 1 & 2 metadata from files
+        compute_hashes: If True, compute blake3 hashes for each file (slow for large files)
     """
     specs: list[SeedAssetSpec] = []
     tag_pool: set[str] = set()
@@ -294,6 +311,15 @@ def build_asset_specs(
                 relative_filename=rel_fname,
             )
 
+        # Compute hash if requested
+        asset_hash: str | None = None
+        if compute_hashes:
+            try:
+                digest = compute_blake3_hash(abs_p)
+                asset_hash = "blake3:" + digest
+            except Exception as e:
+                logging.warning("Failed to hash %s: %s", abs_p, e)
+
         specs.append(
             {
                 "abs_path": abs_p,
@@ -303,6 +329,7 @@ def build_asset_specs(
                 "tags": tags,
                 "fname": rel_fname,
                 "metadata": metadata,
+                "hash": asset_hash,
             }
         )
         tag_pool.update(tags)
@@ -322,8 +349,17 @@ def insert_asset_specs(specs: list[SeedAssetSpec], tag_pool: set[str]) -> int:
         return result.inserted_infos
 
 
-def seed_assets(roots: tuple[RootType, ...], enable_logging: bool = False) -> None:
+def seed_assets(
+    roots: tuple[RootType, ...],
+    enable_logging: bool = False,
+    compute_hashes: bool = False,
+) -> None:
     """Scan the given roots and seed the assets into the database.
+
+    Args:
+        roots: Tuple of root types to scan (models, input, output)
+        enable_logging: If True, log progress and completion messages
+        compute_hashes: If True, compute blake3 hashes for each file (slow for large files)
 
     Note: This function does not mark missing assets. Call mark_missing_outside_prefixes_safely
     separately if cleanup is needed.
@@ -340,7 +376,9 @@ def seed_assets(roots: tuple[RootType, ...], enable_logging: bool = False) -> No
         existing_paths.update(sync_root_safely(r))
 
     paths = collect_paths_for_roots(roots)
-    specs, tag_pool, skipped_existing = build_asset_specs(paths, existing_paths)
+    specs, tag_pool, skipped_existing = build_asset_specs(
+        paths, existing_paths, compute_hashes=compute_hashes
+    )
     created = insert_asset_specs(specs, tag_pool)
 
     if enable_logging:

@@ -82,6 +82,7 @@ class AssetSeeder:
         self._thread: threading.Thread | None = None
         self._cancel_event = threading.Event()
         self._roots: tuple[RootType, ...] = ()
+        self._compute_hashes: bool = False
         self._progress_callback: ProgressCallback | None = None
 
     def start(
@@ -89,6 +90,7 @@ class AssetSeeder:
         roots: tuple[RootType, ...] = ("models", "input", "output"),
         progress_callback: ProgressCallback | None = None,
         prune_first: bool = False,
+        compute_hashes: bool = False,
     ) -> bool:
         """Start a background scan for the given roots.
 
@@ -96,6 +98,7 @@ class AssetSeeder:
             roots: Tuple of root types to scan (models, input, output)
             progress_callback: Optional callback called with progress updates
             prune_first: If True, prune orphaned assets before scanning
+            compute_hashes: If True, compute blake3 hashes for each file (slow for large files)
 
         Returns:
             True if scan was started, False if already running
@@ -108,6 +111,7 @@ class AssetSeeder:
             self._errors = []
             self._roots = roots
             self._prune_first = prune_first
+            self._compute_hashes = compute_hashes
             self._progress_callback = progress_callback
             self._cancel_event.clear()
             self._thread = threading.Thread(
@@ -237,6 +241,9 @@ class AssetSeeder:
         skipped: int | None = None,
     ) -> None:
         """Update progress counters (thread-safe)."""
+        callback: ProgressCallback | None = None
+        progress: Progress | None = None
+
         with self._lock:
             if self._progress is None:
                 return
@@ -249,17 +256,19 @@ class AssetSeeder:
             if skipped is not None:
                 self._progress.skipped = skipped
             if self._progress_callback:
-                try:
-                    self._progress_callback(
-                        Progress(
-                            scanned=self._progress.scanned,
-                            total=self._progress.total,
-                            created=self._progress.created,
-                            skipped=self._progress.skipped,
-                        )
-                    )
-                except Exception:
-                    pass
+                callback = self._progress_callback
+                progress = Progress(
+                    scanned=self._progress.scanned,
+                    total=self._progress.total,
+                    created=self._progress.created,
+                    skipped=self._progress.skipped,
+                )
+
+        if callback and progress:
+            try:
+                callback(progress)
+            except Exception:
+                pass
 
     def _add_error(self, message: str) -> None:
         """Add an error message (thread-safe)."""
@@ -334,7 +343,9 @@ class AssetSeeder:
                 {"roots": list(roots), "total": total_paths},
             )
 
-            specs, tag_pool, skipped_existing = build_asset_specs(paths, existing_paths)
+            specs, tag_pool, skipped_existing = build_asset_specs(
+                paths, existing_paths, compute_hashes=self._compute_hashes
+            )
             self._update_progress(skipped=skipped_existing)
 
             if self._is_cancelled():

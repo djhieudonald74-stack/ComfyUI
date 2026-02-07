@@ -79,7 +79,9 @@ def _build_error_response(
 
 
 def _build_validation_error_response(code: str, ve: ValidationError) -> web.Response:
-    return _build_error_response(400, code, "Validation failed.", {"errors": ve.json()})
+    import json
+    errors = json.loads(ve.json())
+    return _build_error_response(400, code, "Validation failed.", {"errors": errors})
 
 
 def _validate_sort_field(requested: str | None) -> str:
@@ -123,11 +125,8 @@ async def list_assets_route(request: web.Request) -> web.Response:
         return _build_validation_error_response("INVALID_QUERY", ve)
 
     sort = _validate_sort_field(q.sort)
-    order = (
-        "desc"
-        if (q.order or "desc").lower() not in {"asc", "desc"}
-        else q.order.lower()
-    )
+    order_candidate = (q.order or "desc").lower()
+    order = order_candidate if order_candidate in {"asc", "desc"} else "desc"
 
     result = list_assets_page(
         owner_id=USER_MANAGER.get_request_user_id(request),
@@ -233,7 +232,7 @@ async def download_asset_content(request: web.Request) -> web.Response:
         )
 
     quoted = (filename or "").replace("\r", "").replace("\n", "").replace('"', "'")
-    cd = f"{disposition}; filename=\"{quoted}\"; filename*=UTF-8''{urllib.parse.quote(filename)}"
+    cd = f"{disposition}; filename=\"{quoted}\"; filename*=UTF-8''{urllib.parse.quote(quoted)}"
 
     file_size = os.path.getsize(abs_path)
     logging.info(
@@ -490,15 +489,9 @@ async def get_tags(request: web.Request) -> web.Response:
     try:
         query = schemas_in.TagsListQuery.model_validate(query_map)
     except ValidationError as e:
-        return web.json_response(
-            {
-                "error": {
-                    "code": "INVALID_QUERY",
-                    "message": "Invalid query parameters",
-                    "details": e.errors(),
-                }
-            },
-            status=400,
+        import json
+        return _build_error_response(
+            400, "INVALID_QUERY", "Invalid query parameters", {"errors": json.loads(e.json())}
         )
 
     rows, total = list_tags(

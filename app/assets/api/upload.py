@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from typing import Callable
@@ -83,7 +84,10 @@ async def parse_multipart_upload(
                 provided_hash = normalize_and_validate_hash(s)
                 try:
                     provided_hash_exists = check_hash_exists(provided_hash)
-                except Exception:
+                except Exception as e:
+                    logging.warning(
+                        "check_hash_exists failed for hash=%s: %s", provided_hash, e
+                    )
                     provided_hash_exists = None  # do not fail the whole request here
 
         elif fname == "file":
@@ -162,5 +166,5 @@ def delete_temp_file_if_exists(tmp_path: str | None) -> None:
         try:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-        except Exception:
-            pass
+        except OSError as e:
+            logging.debug("Failed to delete temp file %s: %s", tmp_path, e)

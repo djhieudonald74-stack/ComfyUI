@@ -23,8 +23,8 @@ def iter_chunks(seq, n: int):
 def iter_row_chunks(rows: list[dict], cols_per_row: int) -> Iterable[list[dict]]:
     """Yield chunks of rows sized to fit within bind param limits."""
     if not rows:
-        return []
-    rows_per_stmt = max(1, MAX_BIND_PARAMS // max(1, cols_per_row))
+        return
+    rows_per_stmt = calculate_rows_per_statement(cols_per_row)
     for i in range(0, len(rows), rows_per_stmt):
         yield rows[i : i + rows_per_stmt]
 
