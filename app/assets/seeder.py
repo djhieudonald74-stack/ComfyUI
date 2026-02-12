@@ -118,8 +118,10 @@ class AssetSeeder:
         Returns:
             True if scan was started, False if already running
         """
+        logging.info("Asset seeder start requested (roots=%s, phase=%s)", roots, phase.value)
         with self._lock:
             if self._state != State.IDLE:
+                logging.info("Asset seeder already running, skipping start")
                 return False
             self._state = State.RUNNING
             self._progress = Progress()

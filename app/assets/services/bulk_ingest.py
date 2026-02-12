@@ -165,8 +165,6 @@ def batch_insert_seed_assets(
         path_to_asset_id[absolute_path] = asset_id
 
         mime_type = spec.get("mime_type")
-        if mime_type is None:
-            logging.info("batch_insert_seed_assets: no mime_type for %s", absolute_path)
         asset_rows.append(
             {
                 "id": asset_id,
