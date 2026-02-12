@@ -198,6 +198,7 @@ class AssetSeeder:
         with self._lock:
             if self._state not in (State.RUNNING, State.PAUSED):
                 return False
+            logging.info("Asset seeder cancelling (was %s)", self._state.value)
             self._state = State.CANCELLING
             self._cancel_event.set()
             self._pause_event.set()  # Unblock if paused so thread can exit
@@ -222,6 +223,7 @@ class AssetSeeder:
         with self._lock:
             if self._state != State.RUNNING:
                 return False
+            logging.info("Asset seeder pausing")
             self._state = State.PAUSED
             self._pause_event.clear()
             return True
@@ -235,6 +237,7 @@ class AssetSeeder:
         with self._lock:
             if self._state != State.PAUSED:
                 return False
+            logging.info("Asset seeder resuming")
             self._state = State.RUNNING
             self._pause_event.set()
             self._emit_event("assets.seed.resumed", {})
@@ -262,6 +265,7 @@ class AssetSeeder:
         Returns:
             True if new scan was started, False if failed to stop previous
         """
+        logging.info("Asset seeder restart requested")
         with self._lock:
             prev_roots = self._roots
             prev_phase = self._phase
