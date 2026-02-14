@@ -14,6 +14,10 @@ import comfy.ldm.common_dit
 
 from .symmetric_patchifier import SymmetricPatchifier, latent_to_pixel_coords
 
+# DEPRECATED: Import from comfy.text_encoders.llama instead
+# This re-export will be removed in v2.0
+from comfy.text_encoders.llama import precompute_freqs_cis
+
 def _log_base(x, base):
     return np.log(x) / np.log(base)
 
