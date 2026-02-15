@@ -1205,7 +1205,12 @@ class Color(ComfyTypeIO):
 
 @comfytype(io_type="BOUNDING_BOX")
 class BoundingBox(ComfyTypeIO):
-    Type = dict
+    class BoundingBoxDict(TypedDict):
+        x: int
+        y: int
+        width: int
+        height: int
+    Type = BoundingBoxDict
 
     class Input(WidgetInput):
         def __init__(self, id: str, display_name: str=None, optional=False, tooltip: str=None,
