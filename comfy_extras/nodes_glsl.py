@@ -297,11 +297,61 @@ def _init_osmesa():
     logger.debug("_init_osmesa: completed successfully")
     return ctx, buffer
 
+def _init_cgl():
+    """Initialize CGL (macOS native OpenGL). Returns (cgl_context, opengl_lib). Raises RuntimeError on failure."""
+    import ctypes
+    import ctypes.util
+
+    logger.debug("_init_cgl: starting")
+
+    opengl_path = ctypes.util.find_library("OpenGL")
+    if not opengl_path:
+        raise RuntimeError("Could not find OpenGL framework")
+    opengl = ctypes.cdll.LoadLibrary(opengl_path)
+
+    CGLPixelFormatObj = ctypes.c_void_p
+    CGLContextObj = ctypes.c_void_p
+
+    kCGLPFAOpenGLProfile = 99
+    kCGLOGLPVersion_3_2_Core = 0x3200
+    kCGLPFAAccelerated = 73
+    kCGLPFAColorSize = 8
+    kCGLPFAAllowOfflineRenderers = 96
+
+    attrs = (ctypes.c_int * 7)(
+        kCGLPFAOpenGLProfile, kCGLOGLPVersion_3_2_Core,
+        kCGLPFAAccelerated,
+        kCGLPFAColorSize, 32,
+        kCGLPFAAllowOfflineRenderers,
+        0,
+    )
+
+    pix_fmt = CGLPixelFormatObj()
+    npix = ctypes.c_int(0)
+
+    err = opengl.CGLChoosePixelFormat(attrs, ctypes.byref(pix_fmt), ctypes.byref(npix))
+    if err != 0 or not pix_fmt:
+        raise RuntimeError(f"CGLChoosePixelFormat() failed with error {err}")
+
+    ctx = CGLContextObj()
+    err = opengl.CGLCreateContext(pix_fmt, None, ctypes.byref(ctx))
+    opengl.CGLDestroyPixelFormat(pix_fmt)
+    if err != 0 or not ctx:
+        raise RuntimeError(f"CGLCreateContext() failed with error {err}")
+
+    err = opengl.CGLSetCurrentContext(ctx)
+    if err != 0:
+        opengl.CGLDestroyContext(ctx)
+        raise RuntimeError(f"CGLSetCurrentContext() failed with error {err}")
+
+    logger.debug("_init_cgl: completed successfully")
+    return ctx, opengl
+
 
 class GLContext:
     """Manages OpenGL context and resources for shader execution.
 
-    Tries backends in order: GLFW (desktop) → EGL (headless GPU) → OSMesa (software).
+    Tries backends in order: GLFW (desktop) → CGL (macOS) → EGL (headless GPU) → OSMesa (software).
     """
 
     _instance = None
@@ -316,7 +366,6 @@ class GLContext:
         if GLContext._initialized:
             logger.debug("GLContext.__init__: already initialized, skipping")
             return
-        GLContext._initialized = True
 
         logger.debug("GLContext.__init__: starting initialization")
 
@@ -327,13 +376,16 @@ class GLContext:
 
         self._backend = None
         self._window = None
+        self._cgl_ctx = None
+        self._cgl_lib = None
         self._egl_display = None
         self._egl_context = None
         self._egl_surface = None
         self._osmesa_ctx = None
         self._osmesa_buffer = None
+        self._vao = None
 
-        # Try backends in order: GLFW → EGL → OSMesa
+        # Try backends in order: GLFW → CGL (macOS) → EGL (non-macOS) → OSMesa
         errors = []
 
         logger.debug("GLContext.__init__: trying GLFW backend")
@@ -345,7 +397,19 @@ class GLContext:
             logger.debug(f"GLContext.__init__: GLFW backend failed: {e}")
             errors.append(("GLFW", e))
 
-        if self._backend is None:
+        if self._backend is None and sys.platform == "darwin":
+            logger.debug("GLContext.__init__: trying CGL backend")
+            try:
+                self._cgl_ctx, self._cgl_lib = _init_cgl()
+                self._backend = "cgl"
+                logger.debug("GLContext.__init__: CGL backend succeeded")
+            except Exception as e:
+                logger.debug(f"GLContext.__init__: CGL backend failed: {e}")
+                errors.append(("CGL", e))
+
+        # Skip EGL on macOS — DarwinPlatform doesn't support EGL, and importing
+        # it poisons PyOpenGL's platform selection, preventing OSMesa from working.
+        if self._backend is None and sys.platform != "darwin":
             logger.debug("GLContext.__init__: trying EGL backend")
             try:
                 self._egl_display, self._egl_context, self._egl_surface, EGL = _init_egl()
@@ -373,9 +437,9 @@ class GLContext:
                 )
             elif sys.platform == "darwin":
                 platform_help = (
-                    "macOS: GLFW is not supported.\n"
-                    "  Install OSMesa via Homebrew: brew install mesa\n"
-                    "  Then: pip install PyOpenGL PyOpenGL-accelerate"
+                    "macOS: CGL context creation failed.\n"
+                    "  Ensure macOS OpenGL framework is available.\n"
+                    "  Requires: pip install PyOpenGL PyOpenGL-accelerate"
                 )
             else:
                 platform_help = (
@@ -398,7 +462,6 @@ class GLContext:
 
         # Create VAO (required for core profile, but OSMesa may use compat profile)
         logger.debug("GLContext.__init__: creating VAO")
-        self._vao = None
         try:
             vao = gl.glGenVertexArrays(1)
             gl.glBindVertexArray(vao)
@@ -424,11 +487,14 @@ class GLContext:
         vendor = vendor.decode() if vendor else "Unknown"
         version = version.decode() if version else "Unknown"
 
+        GLContext._initialized = True
         logger.info(f"GLSL context initialized in {elapsed:.1f}ms ({self._backend}) - {renderer} ({vendor}), GL {version}")
 
     def make_current(self):
         if self._backend == "glfw":
             glfw.make_context_current(self._window)
+        elif self._backend == "cgl":
+            self._cgl_lib.CGLSetCurrentContext(self._cgl_ctx)
         elif self._backend == "egl":
             from OpenGL.EGL import eglMakeCurrent
             eglMakeCurrent(self._egl_display, self._egl_surface, self._egl_surface, self._egl_context)
